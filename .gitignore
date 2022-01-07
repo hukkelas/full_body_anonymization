@@ -1,0 +1,50 @@
+# FILES
+*.yaml
+*.pkl
+*.flist
+*.zip
+*.out
+*.npy
+*.gz
+*.ckpt
+*.pth
+*.log
+*.pyc
+*.csv
+*.yml
+*.ods
+*.ods#
+*.json
+build_docker.sh
+
+# Images / Videos
+*.png
+*.jpeg
+*.m4a
+*.mkv
+*.mp4
+
+# Directories created
+.cache/
+test_examples/
+.vscode
+__pycache__
+.debug/
+**/.ipynb_checkpoints/**
+outputs/
+
+
+# From pip setup
+build/
+*.egg-info
+*.egg
+.npm/
+
+# From dockerfile
+.bash_history
+.viminfo
+.local/
+*.pickle
+*.onnx
+
+

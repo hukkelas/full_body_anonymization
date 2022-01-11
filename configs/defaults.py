@@ -1,3 +1,4 @@
+import os
 imsize = (288, 160)
 semantic_nc = None
 image_channels = 3
@@ -6,7 +7,7 @@ cse_nc = None
 project = "fba"
 semantic_labels = None
 
-_output_dir = "outputs"
+_output_dir = os.environ["BASE_OUTPUT_DIR"] if "BASE_OUTPUT_DIR" in os.environ else "outputs"
 _cache_dir = ".fba_cache"
 _checkpoint_dir = "checkpoints"
 logger_backend = "wandb" # choices: ["tensorboard", "none"]

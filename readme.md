@@ -4,6 +4,8 @@ This is the official source code for the paper "Realistic Full-Body Anonymizatio
 
 [[Arixv Paper]](https://arxiv.org/abs/2201.02193)
 [[Appendix]](https://folk.ntnu.no/haakohu/fba_appendix.pdf)
+[[Google Colab demo]](https://colab.research.google.com/drive/10bxR6AOityusLFiTKT9ZUoJ5wMDkvCfe?usp=sharing)
+[[Interactive web demo]]()
 
 Surface-guided GANs is an automatic full-body anonymization technique based on Generative Adversarial Networks.
 ![](docs/figures/architecture.jpg)
@@ -28,6 +30,8 @@ We recommend to setup and install pytorch with [anaconda](https://www.anaconda.c
 pip install -e .
 ```
 
+Otherwise, you can setup your environment with our provided [Dockerfile](Dockerfile).
+
 
 ## Test the model
 
@@ -37,24 +41,24 @@ To anonymize, visualize and save an output image, you can write:
 ```
 python3 anonymize.py configs/surface_guided/configE.py coco_val2017_000000001000.jpg --visualize --save
 ```
-The truncation value decides the "creativity" of the generator, which you can specify in the range (0, 1). Setting `-t 1` will generate diverse anonymization between individuals in the image.
-We recommend to set it to `t=0.5` to tradeoff between quality and diversity.
-
+The truncation value decides the "creativity" of the generator, which you can specify in the range (0, 1). Setting `-t 1` will generate diverse anonymization between runs.
+For config A/B/C, the truncation value accepts range of (0, $\infty$). Setting `-t=None` will apply to latent truncation.
 ```
 python3 anonymize.py configs/surface_guided/configE.py coco_val2017_000000001000.jpg --visualize --save -t 1
 ```
 
-## Pre-trained models
-Current release includes a pre-trained model for ConfigE from the main paper.
-More pre-trained models will be released later.
 
 ## Train the model
-Instructions to train and reproduce results from the paper will be released by January 14th 2022.
+See [docs/TRAINING.md](docs/TRAINING.md).
+
+## Reproducing paper results
+See [docs/REPRODUCING.md](docs/REPRODUCING.md).
+
 
 ## License
 All code, except the stated below, is released under [MIT License](License).
 
-Code under has are provided with other licenses:
+Code under:
 - `torch_utils/`: Code modified from [github.com/NVlabs/stylegan2-ada-pytorch](https://github.com/NVlabs/stylegan2-ada-pytorch). Separate license is attached in the directory.
 - `dnnlib/`: Code modified from [github.com/NVlabs/stylegan2-ada-pytorch](https://github.com/NVlabs/stylegan2-ada-pytorch). Separate license is attached in the directory.
 - Detection network: See [Detectron2 License](https://github.com/facebookresearch/detectron2/blob/main/LICENSE).

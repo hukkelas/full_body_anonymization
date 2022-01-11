@@ -21,11 +21,11 @@ def show_video(video_path):
     video_cap.release()
     cv2.destroyAllWindows()
 
-def anonymize_video(video_path, output_path, anonymizer, visualize: bool, max_res: int, start_time: int, save: bool, fps: int):
+def anonymize_video(video_path, output_path, anonymizer, visualize: bool, max_res: int, start_time: int, save: bool, fps: int, truncation_value: float, **kwargs):
     video = mp.VideoFileClip(str(video_path))
     def process_frame(frame):
         frame = np.array(resize(Image.fromarray(frame), max_res))
-        anonymized = anonymizer(frame)
+        anonymized = anonymizer(frame, truncation_value=truncation_value)
 
         if visualize:
             cv2.imshow("frame", anonymized[:, :, ::-1])
@@ -47,7 +47,7 @@ def resize(frame: Image.Image, max_res):
     return frame.resize(new_shape,  resample=Image.BILINEAR)
 
 
-def anonymize_image(image_path, output_path, visualize: bool, anonymizer, max_res: int, save: bool, **kwargs):
+def anonymize_image(image_path, output_path, visualize: bool, anonymizer, max_res: int, save: bool, truncation_value: float, **kwargs):
     with Image.open(image_path) as im:
         im = _apply_exif_orientation(im)
         orig_im_mode = im.mode
@@ -55,7 +55,7 @@ def anonymize_image(image_path, output_path, visualize: bool, anonymizer, max_re
         im = im.convert("RGB")
         im = resize(im, max_res)
     im = utils.im2torch(np.array(im), to_float=False)[0]
-    im_ = anonymizer(im)
+    im_ = anonymizer(im, truncation_value=truncation_value)
     im_ = utils.image2np(im_)
     if visualize:
         while True:
@@ -105,14 +105,12 @@ def anonymize_directory(input_dir: Path, output_dir: Path, **kwargs):
 @click.option("--max_res", default=1920, type=int, help="Maximum resolution  of height/wideo")
 @click.option("--start_time", "--ss", default=0, type=int, help="Start time (second) for vide anonymization")
 @click.option("--fps", default=None, type=int, help="FPS for anonymization")
-@click.option("--static_z", default=False, is_flag=True)
 @click.option("--save", default=False, is_flag=True)
 @click.option("-t", "--truncation_value", default=0, type=click.FloatRange(0, 5), help="")
 @click.option("--detection_score_threshold", default=.3, type=click.FloatRange(0, 1), help="Detection threshold")
-def anonymize_path(config_path, input_path, output_path, model_name,  static_z, truncation_value, detection_score_threshold, **kwargs):
+def anonymize_path(config_path, input_path, output_path, model_name, detection_score_threshold, **kwargs):
     cfg = Config.fromfile(config_path)
-    anonymizer = build_anonymizer(cfg, 
-        static_z=static_z, truncation_value=truncation_value,
+    anonymizer = build_anonymizer(cfg,
         detection_score_threshold=detection_score_threshold)
     input_path = Path(input_path)
     output_path = Path(output_path) if output_path is not None else None

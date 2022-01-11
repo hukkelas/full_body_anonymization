@@ -10,6 +10,18 @@ from .lpips import PerceptualLoss
 lpips_model = None
 
 @torch.no_grad()
+def mse(images1: torch.Tensor, images2: torch.Tensor) -> torch.Tensor:
+    se = (images1 - images2) ** 2
+    se = se.view(images1.shape[0], -1).mean(dim=1)
+    return se
+
+@torch.no_grad()
+def psnr(images1: torch.Tensor, images2: torch.Tensor) -> torch.Tensor:
+    mse_ = mse(images1, images2)
+    psnr = 10 * torch.log10(1 / mse_)
+    return psnr
+
+@torch.no_grad()
 def lpips(images1: torch.Tensor, images2: torch.Tensor) -> torch.Tensor:
     return _lpips_w_grad(images1, images2)
 

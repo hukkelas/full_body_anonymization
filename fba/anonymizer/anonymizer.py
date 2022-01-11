@@ -1,8 +1,8 @@
 
 import collections
-import pathlib
 import numpy as np
 import torch
+from torch import nn
 from PIL import Image
 from fba import utils
 from fba.infer import build_trained_generator
@@ -20,7 +20,7 @@ def build_anonymizer(cfg, detection_score_threshold, **kwargs):
         generator = build_generator(cfg)
     else:
         generator, _ = build_trained_generator(cfg)
-    return Anonymizer(detector, generator, debug_directory=cfg.output_dir.joinpath("anonymization_debug"), **kwargs)
+    return Anonymizer(detector, generator, **kwargs)
 
 
 def paste_im(target_im, im, mask_filled, mask, exp_bbox):
@@ -77,22 +77,15 @@ class Anonymizer:
     def __init__(
             self,
             detector,
-            generator,
-            debug_directory: pathlib.Path,
-            static_z: bool,
-            truncation_value: float) -> None:
+            generator) -> None:
         self.detector = detector
         self.generator = generator
-        self.debug_directory = debug_directory
-        self.debug_directory.mkdir(exist_ok=True, parents=True)
         self.z = None
-        self.static_z = static_z
         self.embed_map = self.detector.mesh_vertex_embeddings["smpl_27554"]
-        self.truncation_value = truncation_value
         self.batch_size = 2
 
     @torch.no_grad()
-    def forward(self, im: torch.Tensor) -> np.ndarray:
+    def forward(self, im: torch.Tensor, truncation_value: float = None) -> np.ndarray:
         assert im.dtype == torch.uint8
         im = utils.to_cuda(im)
         detections = self.detector(im)
@@ -109,7 +102,7 @@ class Anonymizer:
         boxes = []
         anonymized_bodies = []
         masked_areas = []
-        E_areas = []
+        E_masks = []
         cur_batch = collections.defaultdict(list)
         for idx, instance in enumerate(detections):
             boxes.append(instance["exp_bbox"])
@@ -122,14 +115,14 @@ class Anonymizer:
                 batch = {k: torch.cat(v, dim=0) for k, v in cur_batch.items()}
                 orig_shape = batch["img"].shape[2:]
                 batch["condition"] = batch["img"] * batch["mask"]
-                anonymized = sample_from_G(batch, self.generator, TruncationStrategy.W_INTERPOLATE, self.truncation_value)["img"]
+                anonymized = sample_from_G(batch, self.generator, TruncationStrategy.W_INTERPOLATE, truncation_value)["img"]
                 anonymized = F.resize(anonymized, size=orig_shape, antialias=True)
                 anonymized = utils.denormalize_img(anonymized).mul(255).byte()
                 anonymized_bodies.extend(anonymized)
                 masked_areas.extend((batch["mask"].bool().logical_not()).squeeze(dim=1))
-                E_areas.extend(batch["E_mask"].squeeze(dim=1))
+                E_masks.extend(batch["E_mask"].squeeze(dim=1))
                 cur_batch = collections.defaultdict(list)
-        im = stitch_image(im, anonymized_bodies, masked_areas, E_areas, boxes)
+        im = stitch_image(im, anonymized_bodies, masked_areas, E_masks, boxes)
         return im
 
     def __call__(self, *args, **kwargs):

@@ -105,12 +105,12 @@ class DecoderGenerator(BaseGenerator):
             z = torch.randn((x.shape[0], self.z_channels), device=x.device, dtype=x.dtype)
         return z
 
-    def forward(self, condition, mask, z=None, w=None, semantic_mask=None, e_area=None, vertices=None, update_ema=False, E=None, modulation_parameters=None,**kwargs):
+    def forward(self, condition, mask, z=None, w=None, semantic_mask=None, E_mask=None, vertices=None, update_ema=False, E=None, modulation_parameters=None,**kwargs):
         if z is None:
             z = self.get_z(condition)
         if modulation_parameters is None:
             modulation_parameters = self.style_net(
-                semantic_mask=semantic_mask, z=z, vertices=vertices, w=w, e_area=e_area, update_ema=update_ema, E=E)
+                semantic_mask=semantic_mask, z=z, vertices=vertices, w=w, E_mask=E_mask, update_ema=update_ema, E=E)
         batch = {"mask": mask, "modulation_params": iter(modulation_parameters)}
         batch["x"] = self.x.repeat(condition.shape[0], 1, 1, 1)
         if self.embed_z:

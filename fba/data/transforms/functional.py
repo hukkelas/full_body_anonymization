@@ -12,7 +12,7 @@ def get_symmetry_transform(symmetry_url):
     return symmetry["vertex_transforms"]
 
 
-hflip_handled_cases = set(["landmarks", "img", "mask", "border", "semantic_mask", "vertices", "e_area", "embed_map", "condition", "embedding", "vertx2cat"])
+hflip_handled_cases = set(["landmarks", "img", "mask", "border", "semantic_mask", "vertices", "E_mask", "embed_map", "condition", "embedding", "vertx2cat"])
 symmetry_transform = torch.from_numpy(get_symmetry_transform("https://dl.fbaipublicfiles.com/densepose/meshes/symmetry/symmetry_smpl_27554.pkl")).long()
 
 
@@ -37,8 +37,9 @@ def hflip(container: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         container["vertices"] = F.hflip(container["vertices"])
         symmetry_transform_ = symmetry_transform.to(container["vertices"].device)
         container["vertices"] = symmetry_transform_[container["vertices"].long()]
-    if "e_area" in container:
-        container["e_area"] = F.hflip(container["e_area"])
+    if "E_mask" in container:
+        container["E_mask"] = F.hflip(container["E_mask"])
+    
     return container
 
 

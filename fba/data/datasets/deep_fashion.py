@@ -61,6 +61,6 @@ class DeepFashion(torch.utils.data.Dataset):
             "vertices": vertices,
             "mask": torch.zeros_like(mask),
             "embed_map": self.embed_map,
-            "e_area": 1 - mask - border
+            "E_mask": 1 - mask - border
         }
         return self.transform(batch)

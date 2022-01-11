@@ -1,34 +1,23 @@
 import os
 
 
-imsize = (288, 160)
+imsize = (384, 256)
 semantic_nc = None
 cse_nc = 16
 
-dataset_type = "CocoCSE"
+dataset_type = "DeepFashion"
 data_root = os.environ["BASE_DATASET_PATH"] if "BASE_DATASET_PATH" in os.environ else "data"
-data_root = os.path.join(data_root, "coco_cse")
+data_root = os.path.join(data_root, "deep_fashion_highres")
 
 data_train = dict(
     dataset=dict(
         type=dataset_type,
-        dirpath=os.path.join(data_root, "train"),
+        dirpath=data_root,
+        subset_split_file="train_images.txt"
     ),
     cpu_transforms=[
     ],
     image_gpu_transforms=[
-        # If not enough augmentation, can set higher for most values...
-        dict(type="StyleGANAugmentPipe",
-            rotate=0.5, rotate_max=.05,
-            xint=.5, xint_max=0.05,
-            scale=.5, scale_std=.05,
-            aniso=0.5, aniso_std=.05,
-            xfrac=.5, xfrac_std=.05,
-            brightness=.5, brightness_std=.05,
-            contrast=.5, contrast_std=.1,
-            hue=.5, hue_max=.05,
-            saturation=.5, saturation_std=.5,
-            imgfilter=.5, imgfilter_std=.1),
         dict(type="RandomHorizontalFlip", p=0.5),
         dict(type="CreateEmbedding"),
         dict(type="Resize"),
@@ -39,7 +28,8 @@ data_train = dict(
 data_val = dict(
     dataset=dict(
         type=dataset_type,
-        dirpath=os.path.join(data_root, "val"),
+        dirpath=data_root,
+        subset_split_file="test_images.txt"
     ),
     cpu_transforms=[
     ],

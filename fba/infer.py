@@ -16,13 +16,14 @@ def build_trained_generator(cfg, global_step=None):
             raise e
         ckpt_path = utils.download_file(cfg.checkpoint_url)  
     ckpt = load_checkpoint(ckpt_path)
+    global_step = ckpt["global_step"] if "global_step" in ckpt else None
     ckpt = ckpt["EMA_generator"]
 
     g = build_generator(cfg)
     g.eval()
     g.load_state_dict(ckpt)
     print(f"Generator loaded, num parameters: {utils.num_parameters(g)/1e6}M")
-    return g, None
+    return g, global_step
 
 
 def build_trained_discriminator(cfg, global_step=None):

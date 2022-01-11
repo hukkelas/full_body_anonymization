@@ -11,7 +11,7 @@ def get_out(type: str):
         return SPADEOut
     if type == "CLADE":
         return CLADEOut
-    if type == "CINADE":
+    if type == "INADE":
         return ClassINADEOut
     raise ValueError(f"{type} has to be one of SPADE, CLADE, ClassINADEOut, or INADE")
 

@@ -45,16 +45,16 @@ def fpn_cse_d_loss(
 
 
 @CRITERION_REGISTRY.register_module
-def uncond_fpn_cse_g_loss(D_out_fake, e_area, embedding, l1_weight: float, **kwargs):
-    mask = 1 - e_area
+def uncond_fpn_cse_g_loss(D_out_fake, E_mask, embedding, l1_weight: float, **kwargs):
+    mask = 1 - E_mask
     border = torch.zeros_like(mask)
     return fpn_cse_g_loss(D_out_fake, mask, border, embedding, l1_weight)
 
 
 @CRITERION_REGISTRY.register_module
 def uncond_fpn_cse_d_loss(
-        D_out_real, D_out_fake, e_area, embedding, l1_weight: float,
+        D_out_real, D_out_fake, E_mask, embedding, l1_weight: float,
         lambda_real: float, lambda_fake: float, **kwargs):
-    mask = 1 - e_area
+    mask = 1 - E_mask
     border = torch.zeros_like(mask)
     return fpn_cse_d_loss(D_out_real, D_out_fake, mask, border, embedding, l1_weight, lambda_real, lambda_fake)

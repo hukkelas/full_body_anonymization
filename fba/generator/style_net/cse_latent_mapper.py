@@ -183,8 +183,8 @@ class CSEStyleMapper(Module):
         embedding = self.E_map(vertices, z, w, update_ema=update_ema)
         if embedding.shape[2] != mask.shape[2]:
             embedding = F.interpolate(embedding, size=mask.shape[2:], mode=self.resample, align_corners=True)
-        e_area = 1 - mask - border
-        x = torch.cat((embedding*e_area, mask, border, e_area), dim=1)
+        E_mask = 1 - mask - border
+        x = torch.cat((embedding*E_mask, mask, border, E_mask), dim=1)
         embedding = self.global_mask(x)
         if self.modulate_encoder:
             for shape, layer in zip(self.feature_size_enc, self.enc_layers):
@@ -246,16 +246,16 @@ class UnconditionalCSEStyleMapper(Module):
         self.dec_layers = [CSELinear(self.E_map.out_dim, shape[0], **kwargs) for shape in self.feature_sizes_dec]
         self.dec_layers = nn.ModuleList(self.dec_layers)
 
-    def forward(self, z, vertices,w, e_area, update_ema,E=None, **kwargs):
+    def forward(self, z, vertices,w, E_mask, update_ema,E=None, **kwargs):
         modulation_params = []
         embeddings_ = {}
         if E is None:
             embedding = self.E_map(vertices, z, w, update_ema=update_ema)
         else:
             embedding = E
-        if embedding.shape[2] != e_area.shape[2]:
-            embedding = F.interpolate(embedding, size=e_area.shape[2:], mode=self.resample, align_corners=True)
-        x = torch.cat((embedding*e_area, e_area, 1-e_area), dim=1)
+        if embedding.shape[2] != E_mask.shape[2]:
+            embedding = F.interpolate(embedding, size=E_mask.shape[2:], mode=self.resample, align_corners=True)
+        x = torch.cat((embedding*E_mask, E_mask, 1-E_mask), dim=1)
         embedding = self.global_mask(x)
         for shape, layer in zip(self.feature_sizes_dec, self.dec_layers):
             assert embedding.shape[2] >= shape[1], (embedding.shape, shape)

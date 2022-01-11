@@ -49,12 +49,14 @@ class CocoCSE(torch.utils.data.Dataset):
         vertices = torch.from_numpy(vertices.squeeze()).long()
         mask = torch.from_numpy(mask.squeeze()).float()
         border = torch.from_numpy(border.squeeze()).float()[None]
+        E_mask = 1 - mask - border
         batch = {
             "img": im,
             "vertices": vertices,
             "mask": mask,
             "embed_map": self.embed_map,
-            "border": border
+            "border": border,
+            "E_mask": E_mask
         }
         return self.transform(batch)
 

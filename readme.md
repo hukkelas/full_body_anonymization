@@ -5,7 +5,6 @@ This is the official source code for the paper "Realistic Full-Body Anonymizatio
 [[Arixv Paper]](https://arxiv.org/abs/2201.02193)
 [[Appendix]](https://folk.ntnu.no/haakohu/fba_appendix.pdf)
 [[Google Colab demo]](https://colab.research.google.com/drive/10bxR6AOityusLFiTKT9ZUoJ5wMDkvCfe?usp=sharing)
-[[Interactive web demo]]()
 
 Surface-guided GANs is an automatic full-body anonymization technique based on Generative Adversarial Networks.
 ![](docs/figures/architecture.jpg)

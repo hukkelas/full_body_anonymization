@@ -34,6 +34,8 @@ Otherwise, you can setup your environment with our provided [Dockerfile](Dockerf
 
 ## Test the model
 
+
+### Anonymizing files
 The file `anonymize.py` can anonymize image paths, directories and videos. `python anonymize.py --help` prints the different options.
 
 To anonymize, visualize and save an output image, you can write:
@@ -45,7 +47,12 @@ For config A/B/C, the truncation value accepts range of (0, $\infty$). Setting `
 ```
 python3 anonymize.py configs/surface_guided/configE.py coco_val2017_000000001000.jpg --visualize --save -t 1
 ```
-
+### Gradio App
+Check out the interactive demo with our [gradio implementation](app.py).
+Run
+```
+python3 app.py
+```
 
 ## Train the model
 See [docs/TRAINING.md](docs/TRAINING.md).

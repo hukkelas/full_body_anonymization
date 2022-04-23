@@ -12,7 +12,7 @@ The script expects the following directory file structure:
 PATH_TO_COCO
     - val2014
         - *.jpg
-    - train2017
+    - train2014
         - *.jpg
 ```
 

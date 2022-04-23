@@ -58,13 +58,13 @@ PATH_TO_COCO_CSE
         - embedding
             - *.npy # embedding for each image
         - embed_map.npy # the 16-channel CSE embedding for each vertex
-    - train
+    - val
         - images/
             - *.png
         - embedding
             - *.npy # embedding for each image
         - embed_map.npy # the 16-channel CSE embedding for each vertex
-    - train
+    - minival
         - images/
             - *.png
         - embedding

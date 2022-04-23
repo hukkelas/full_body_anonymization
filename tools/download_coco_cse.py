@@ -63,6 +63,25 @@ def download_and_extract_embedding(split:str, target_dir: Path):
         fp.extractall(embedding_path)
     print(f"You can delete the zipfile: {embedding_zip_path} to clean up hard drive space.")
 
+def cut_and_pad(im: Image, bbox):
+    target_shape = (288, 160)
+    x0, y0, x1, y1 = bbox
+    scaling_factor = (y1 - y0) / target_shape[0]
+    x0, y0, x1, y1 = [int(_*scaling_factor) for _ in [x0, y0, x1, y1]]
+    im = im.resize(tuple(int(_*scaling_factor) for _ in im.size), resample=Image.LANCZOS)
+    im = np.array(im)
+    new_im = np.zeros((y1-y0, x1-x0, 3), dtype=np.uint8)
+    y0_t = max(0, -y0)
+    y1_t = min(y1-y0, (y1-y0)-(y1-im.shape[0]))
+    x0_t = max(0, -x0)
+    x1_t = min(x1-x0, (x1-x0)-(x1-im.shape[1]))
+    x0 = max(0, x0)
+    y0 = max(0, y0)
+    x1 = min(x1, im.shape[1])
+    y1 = min(y1, im.shape[0])
+    new_im[y0_t:y1_t, x0_t:x1_t] = im[y0:y1, x0:x1]
+    new_im = Image.fromarray(new_im).resize(target_shape[::-1], resample=Image.BILINEAR)    
+    return new_im
 
 def generate_coco_cse(split: str, coco_path: Path, target_path: Path):
 
@@ -81,11 +100,10 @@ def generate_coco_cse(split: str, coco_path: Path, target_path: Path):
         coco_impath = coco_path.joinpath(coco_image_name)
         if not coco_impath.is_file():
             raise FileNotFoundError("Did not find image in path: " + str(coco_impath.absolute()))
-        coco_image = np.array(Image.open(coco_impath))
-        l, t, r, b = info["box"]
-        im = coco_image[t:b, l:r]
+        coco_image = Image.open(coco_impath)
+        im = cut_and_pad(coco_image, info["box"])
         target_impath = cse_imdir.joinpath(coco_cse_image_id + ".png")
-        Image.fromarray(im).save(target_impath)
+        im.save(target_impath)
         
     for coco_cse_image_id in tqdm.tqdm(metainfo.keys(), desc="Validating correctness of file structure"):
         embedding_path = target_dir.joinpath("embedding", coco_cse_image_id + ".npy")

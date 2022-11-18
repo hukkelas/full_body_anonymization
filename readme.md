@@ -13,6 +13,8 @@ The key idea of surface-guided GANs is to guide the generative model with dense 
 ![](docs/figures/method.jpg)
 
 
+### Check out the new [DeepPrivacy2](https://github.com/hukkelas/deep_privacy2)! It significantly improves anonymization quality compared to this repository.
+
 ## Requirements
 - Pytorch >= 1.9
 - Torchvision >= 0.11

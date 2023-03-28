@@ -75,11 +75,13 @@ Code under:
 ## Citation
 If you use this code for your research, please cite:
 ```
-@misc{hukkelås2022realistic,
-      title={Realistic Full-Body Anonymization with Surface-Guided GANs}, 
-      author={Håkon Hukkelås and Morten Smebye and Rudolf Mester and Frank Lindseth},
-      year={2022},
-      eprint={2201.02193},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
-}
+@inproceedings{hukkelas23FBA,
+  author={Hukkelås, Håkon and Smebye, Morten and Mester, Rudolf and Lindseth, Frank},
+  booktitle={2023 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)}, 
+  title={Realistic Full-Body Anonymization with Surface-Guided GANs}, 
+  year={2023},
+  volume={},
+  number={},
+  pages={1430-1440},
+  doi={10.1109/WACV56688.2023.00148}}
+

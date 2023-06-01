@@ -1,13 +1,15 @@
+import pickle
 import torch
 import time
 import torch_fidelity
 from pathlib import Path
-from torch_fidelity.generative_model_modulewrapper import GenerativeModelModuleWrapper
-from fba import utils, logger
-from .lpips import PerceptualLoss
-
-
+from fba import utils
+from .lpips import SampleSimilarityLPIPS
+from torch_fidelity.defaults import DEFAULTS as trf_defaults
+from torch_fidelity.metric_fid import fid_features_to_statistics, fid_statistics_to_metric
+from torch_fidelity.utils import create_feature_extractor
 lpips_model = None
+fid_model = None
 
 @torch.no_grad()
 def mse(images1: torch.Tensor, images2: torch.Tensor) -> torch.Tensor:
@@ -29,95 +31,88 @@ def lpips(images1: torch.Tensor, images2: torch.Tensor) -> torch.Tensor:
 def _lpips_w_grad(images1: torch.Tensor, images2: torch.Tensor) -> torch.Tensor:
     global lpips_model
     if lpips_model is None:
-        lpips_model = PerceptualLoss(
-            model="net-lin", net="alex"
-        )
-    images1 = images1 * 2 - 1
-    images2 = images2 * 2 - 1
+        lpips_model = utils.to_cuda(SampleSimilarityLPIPS())
+    
+    images1 = images1.mul(255)
+    images2 = images2.mul(255)
     with torch.cuda.amp.autocast(utils.AMP()):
-        dists = lpips_model(images1, images2, normalize=False).view(-1)
+        dists = lpips_model(images1, images2)[0].view(-1)
     return dists
 
 
+
+
 @torch.no_grad()
+@torch.inference_mode()
 def compute_metrics_iteratively(
-        dataloader, generator, n_diversity_samples: int,
-        fid_real_directory: str,
-        truncation_value=999999):
+        dataloader, generator,
+        cache_directory,
+        truncation_value=999999,
+        autocast_fp16=True,
+        include_two_fake = False
+        ):
     """
     Args:
         n_samples (int): Creates N samples from same image to calculate stats
     """
-    assert n_diversity_samples > 0
-    N_images = 0
-    accumulated_metrics = {"lpips": 0, "lpips/diversity": 0}
+    global lpips_model, fid_model
+    if lpips_model is None:
+        lpips_model = utils.to_cuda(SampleSimilarityLPIPS())
+    if fid_model is None:
+        fid_model = create_feature_extractor(
+            trf_defaults["feature_extractor"], [trf_defaults["feature_layer_fid"]], cuda=False)
+        fid_model = utils.to_cuda(fid_model)
+    cache_directory = Path(cache_directory)
     start_time = time.time()
-    if utils.rank() == 0:
-        fake_images = []
-        real_images = []
-    for batch in utils.tqdm_(dataloader, desc="Validating on dataset."):
-        real_data = batch["img"]
-        lpips_values = torch.zeros(
-                real_data.shape[0], n_diversity_samples * 2, dtype=real_data.dtype, device=real_data.device)
-        lpips_diversity = torch.zeros(
-            real_data.shape[0], n_diversity_samples, dtype=real_data.dtype, device=real_data.device)
+    lpips_total = torch.tensor(0, dtype=torch.float32, device=utils.get_device())
+    diversity_total = torch.zeros_like(lpips_total)
+    assert dataloader.drop_last
+    fid_cache_path = cache_directory.joinpath("fid_stats.pkl")
+    has_fid_cache = fid_cache_path.is_file()
+    if not has_fid_cache:
+        fid_features_real = torch.zeros(len(dataloader)*dataloader.batch_size, 2048, dtype=torch.float32, device=utils.get_device())
+    fid_features_fake = torch.zeros(len(dataloader)*dataloader.batch_size * (1+include_two_fake), 2048, dtype=torch.float32, device=utils.get_device())
+    for batch_idx, batch in enumerate(utils.tqdm_(dataloader, desc="Validating on dataset.")):
+        sidx = batch_idx * dataloader.batch_size
+        eidx = (1+batch_idx) * dataloader.batch_size
+        assert batch["img"].shape[0] == dataloader.batch_size, batch["img"].shape[0]
+        with torch.cuda.amp.autocast(autocast_fp16 and utils.AMP()):
+            fakes1 = generator(**batch, truncation_value=truncation_value)["img"]
+            fakes2 = generator(**batch, truncation_value=truncation_value)["img"]
+            real_data = batch["img"]
+            fakes1 = utils.denormalize_img(fakes1).mul(255)
+            fakes2 = utils.denormalize_img(fakes2).mul(255)
+            real_data = utils.denormalize_img(real_data).mul(255)
+            lpips_1, real_lpips_feats, fake1_lpips_feats = lpips_model(real_data, fakes1)
+            fake2_lpips_feats = lpips_model.get_feats(fakes2)
+            lpips_2 = lpips_model.lpips_from_feats(real_lpips_feats, fake2_lpips_feats)
 
-        real_data = utils.denormalize_img(real_data)
-        r = utils.gather_tensors((real_data*255).byte())
-        if utils.rank() == 0:
-            real_images.append(r.cpu())
-        for i in range(n_diversity_samples):
-            with torch.cuda.amp.autocast(enabled=utils.AMP()):
-                fakes1 = generator(**batch, truncation_value=truncation_value)["img"]
-                fakes2 = generator(**batch, truncation_value=truncation_value)["img"]
-            fakes1 = utils.denormalize_img(fakes1)
-            fakes2 = utils.denormalize_img(fakes2)
-            f1 = utils.gather_tensors((fakes1*255).byte()).cpu()
-            f2 = utils.gather_tensors((fakes2*255).byte()).cpu()
-            if utils.rank() == 0:
-                fake_images.append(f1)
-                fake_images.append(f2)
-            lpips_diversity[:, i] = lpips(fakes1, fakes2)
-            lpips_values[:, 2*i] = lpips(real_data, fakes1)
-            lpips_values[:, 2*i+1] = lpips(real_data, fakes2)
-        accumulated_metrics["lpips"] += lpips_values.mean(dim=1).sum()
-        accumulated_metrics["lpips/diversity"] += lpips_diversity.mean(dim=1).sum()
-        N_images += batch["img"].shape[0]
-
-    for key in accumulated_metrics.keys():
-        utils.all_reduce(accumulated_metrics[key], torch.distributed.ReduceOp.SUM)
-        accumulated_metrics[key] /= (N_images * utils.world_size())
-    to_return = {k: v.cpu().item() for k, v in accumulated_metrics.items()}
-
-    if utils.rank() == 0:
-        logger.info(f"Computing FID from {len(fake_images)*fake_images[0].shape[0]} samples")
-
-        fid_metrics = torch_fidelity.calculate_metrics(
-            input1=ImageIteratorWrapper(fake_images, ),
-            input2=ImageIteratorWrapper(real_images),
-            cuda=torch.cuda.is_available(),
-            fid=True,
-            input2_cache_name="_".join(Path(fid_real_directory).parts) + "_cached_imsize" + str(fake_images[0].shape[-1]),
-            batch_size=fake_images[0].shape[0],
-            input1_model_num_samples=len(fake_images)*fake_images[0].shape[0],
-            input2_model_num_samples=len(real_images)*real_images[0].shape[0],
-        )
-        to_return["fid"] = fid_metrics["frechet_inception_distance"]
-        del fid_metrics["frechet_inception_distance"]
-        to_return.update(fid_metrics)
-    val_time = time.time() - start_time
-    to_return["validation_time_s"] = val_time
+            lpips_total += lpips_1.mean().add(lpips_2.mean()).div(2)
+            diversity_total += lpips_model.lpips_from_feats(fake1_lpips_feats, fake2_lpips_feats).mean()
+            if not has_fid_cache:
+                fid_features_real[sidx:eidx] = fid_model(real_data.byte())[0]
+            sidx = sidx*(1+include_two_fake)
+            fid_features_fake[sidx:sidx+dataloader.batch_size] = fid_model(fakes1.byte())[0]
+            if include_two_fake:
+                fid_features_fake[sidx+dataloader.batch_size:sidx+dataloader.batch_size*2] = fid_model(fakes2.byte())[0]
+    if has_fid_cache:
+        with open(fid_cache_path, "rb") as fp:
+            fid_stat_real = pickle.load(fp)
+    else:
+        fid_stat_real = fid_features_to_statistics(utils.gather_tensors(fid_features_real).cpu())
+        cache_directory.mkdir(exist_ok=True, parents=True)
+        with open(fid_cache_path, "wb") as fp:
+            pickle.dump(fid_stat_real, fp)
+    fid_stat_fake = fid_features_to_statistics(utils.gather_tensors(fid_features_fake).cpu())
+    fid_ =  fid_statistics_to_metric(fid_stat_real, fid_stat_fake, verbose=False)["frechet_inception_distance"]
+    to_return = {
+        "lpips": (lpips_total / len(dataloader)),
+        "lpips_diversity": (diversity_total / len(dataloader))
+    }
+    for key in to_return.keys():
+        utils.all_reduce(to_return[key], torch.distributed.ReduceOp.SUM)
+        to_return[key] /= utils.world_size()
+    to_return = {k: v.cpu().item() for k, v in to_return.items()}
+    to_return["fid"] = fid_
+    to_return["validation_time_s"] = time.time() - start_time
     return to_return
-
-
-class ImageIteratorWrapper(GenerativeModelModuleWrapper):
-
-    def __init__(self, images):
-        super().__init__(torch.nn.Module(), 1, "normal", 0)
-        self.images = images
-        self.it = 0
-
-    @torch.no_grad()
-    def forward(self, z, **kwargs):
-        self.it += 1
-        return self.images[self.it-1].to(utils.get_device())

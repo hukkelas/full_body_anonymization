@@ -2,11 +2,8 @@
 import collections
 import numpy as np
 import torch
-from torch import nn
-from PIL import Image
 from fba import utils
 from fba.infer import build_trained_generator
-from fba.utils import vis_utils
 from fba.infer import TruncationStrategy, sample_from_G
 from fba.build import build_generator
 from .cse import CSEDetector
@@ -96,9 +93,9 @@ class Anonymizer:
             exp_bbox_cfg=dict(percentage_background=0.3, axis_minimum_expansion=.1),
             exp_bbox_filter=dict(minimum_area=32*32, min_bbox_ratio_inside=0, aspect_ratio_range=[0, 99999]),
         )
-        detections = process_cse_detections(
+        detections = list(process_cse_detections(
             im, **detections, **post_process_cfg
-        )
+        ))
         boxes = []
         anonymized_bodies = []
         masked_areas = []
@@ -111,10 +108,11 @@ class Anonymizer:
             cur_batch["img"].append(instance["im"])
             cur_batch["E_mask"].append(instance["E_mask"])
             cur_batch["vertices"].append(instance["vertices"][None])
-            if idx == instance["N"] - 1 or ((idx+1) % self.batch_size == 0):
+            if idx == len(detections) - 1 or ((idx+1) % self.batch_size == 0):
                 batch = {k: torch.cat(v, dim=0) for k, v in cur_batch.items()}
                 orig_shape = batch["img"].shape[2:]
                 batch["condition"] = batch["img"] * batch["mask"]
+                batch["embedding"] = self.embed_map[batch["vertices"]].permute(0, 3, 1, 2) * batch["E_mask"]
                 anonymized = sample_from_G(batch, self.generator, TruncationStrategy.W_INTERPOLATE, truncation_value)["img"]
                 anonymized = F.resize(anonymized, size=orig_shape, antialias=True)
                 anonymized = utils.denormalize_img(anonymized).mul(255).byte()
@@ -127,4 +125,3 @@ class Anonymizer:
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
-

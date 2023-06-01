@@ -105,7 +105,7 @@ class StyleGANAugmentPipe(torch.nn.Module):
     def forward(self, batch, G_inv, I_3, do_hflip):
         batch = {k: v.clone() for k,v in batch.items()}
         images = batch["img"]
-        batch["vertices"] = batch["vertices"][:, None].float()
+        batch["vertices"] = batch["vertices"].float()
         assert isinstance(images, torch.Tensor) and images.ndim == 4
         batch_size, num_channels, height, width = images.shape
         device = images.device
@@ -161,7 +161,7 @@ class StyleGANAugmentPipe(torch.nn.Module):
             batch["border"] = torch.nn.functional.interpolate(batch["border"][:, :, Hz_pad*2:-Hz_pad*2, Hz_pad*2:-Hz_pad*2], scale_factor=.5, mode="nearest", recompute_scale_factor=False)
             batch["vertices"] = torch.nn.functional.interpolate(batch["vertices"][:, :, Hz_pad*2:-Hz_pad*2, Hz_pad*2:-Hz_pad*2], scale_factor=.5, mode="nearest", recompute_scale_factor=False)
         batch["img"] = images
-        batch["vertices"] = batch["vertices"].squeeze(dim=1)
+        batch["vertices"] = batch["vertices"]
         if do_hflip:
             base_transform = set(["landmarks", "img", "mask", "border", "vertices", "E_mask", "embed_map", "condition", "embedding", "vertx2cat"])
             batch1 = hflip({k: v for k, v in batch.items() if k in base_transform})
@@ -173,7 +173,9 @@ class StyleGANAugmentPipe(torch.nn.Module):
             batch = vertx2semantic(batch)
             batch = one_hot_semantic(batch, n_semantic)
         batch["condition"] = batch["img"] * batch["mask"]
-        batch["embedding"] = batch["embed_map"][batch["vertices"].long()].permute(0, 3, 1, 2)
+        assert (batch["mask"][batch["border"] == 1] == 0).all()
+        batch["E_mask"] = 1 - batch["mask"] - batch["border"]
+        batch["embedding"] = batch["embed_map"][batch["vertices"].long().squeeze(dim=1)].permute(0, 3, 1, 2) * batch["E_mask"]
         return batch
 
 @torch.no_grad()
@@ -190,7 +192,7 @@ def calculate_affine_invariance(dl, G, transform):
         utils.set_seed(i)
         img_rot = G(**batch_rot)["img"]
         img_rot = utils.denormalize_img(img_rot)
-        psnr_ = psnr(img, img_rot)
+        psnr_ = psnr(img.contiguous(), img_rot.contiguous())
 
         n_images += batch["img"].shape[0]
         total_psnr += psnr_.sum().item()
@@ -250,5 +252,11 @@ def main(config_path: str, num_images: int):
 
 
 if __name__ == "__main__":
+    import os
+    if os.environ.get("AMP_ENABLED") is None:
+        print("AMP not set. setting to False")
+        os.environ["AMP_ENABLED"] = "0"
+    else:
+        assert os.environ["AMP_ENABLED"] in ["0", "1"]
     main()
 

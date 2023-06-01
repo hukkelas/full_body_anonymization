@@ -1,22 +1,37 @@
-_base_config_ = ["configA.py"]
-max_images_to_train = 10e6
-
-checkpoint_url = "https://folk.ntnu.no/haakohu/checkpoints/surface_guided/configE.torch"
+_base_config_ = ["configD.py"]
 
 generator = dict(
-    use_norm=True,
     cnum=64,
-    style_cfg=dict(
-        type="CSEStyleMapper", encoder_modulator="CSELinear", decoder_modulator="CSELinear",middle_modulator="CSELinear",
-        w_mapper=dict(input_z=True)),
-    embed_z=False
 )
-loss = dict(
-    gan_criterion=dict(type="fpn_cse", l1_weight=.1, lambda_real=1, lambda_fake=0)
-)
-
 discriminator=dict(
-        cnum=64)
+    cnum=64
+)
 
-optimizer=dict(D_opts=dict(lr=0.002), G_opts=dict(lr=0.002))
-
+data_train = dict(
+    image_gpu_transforms=[
+        dict(type="StyleGANAugmentPipe",
+            rotate=0.5, rotate_max=.05,
+            xint=.5, xint_max=0.05,
+            scale=.5, scale_std=.05,
+            aniso=0.5, aniso_std=.05,
+            xfrac=.5, xfrac_std=.05,
+            brightness=.5, brightness_std=.05,
+            contrast=.5, contrast_std=.1,
+            hue=.5, hue_max=.05,
+            saturation=.5, saturation_std=.5,
+            imgfilter=.5, imgfilter_std=.1),
+        dict(type="RandomHorizontalFlip", p=0.5),
+        dict(type="CreateEmbeddingCorrect"),
+        dict(type="Resize"),
+        dict(type="Normalize", mean=(0.5,), std=(0.5,), inplace=True),
+        dict(type="CreateCondition"),
+    ],
+)
+data_val = dict(
+    image_gpu_transforms=[
+        dict(type="CreateEmbeddingCorrect"),
+        dict(type="Resize"),
+        dict(type="Normalize", mean=(0.5,), std=(0.5,), inplace=True),
+        dict(type="CreateCondition"),
+    ],
+)

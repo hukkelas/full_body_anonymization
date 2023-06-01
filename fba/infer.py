@@ -45,9 +45,8 @@ class TruncationStrategy(enum.Enum):
 
 def sample_from_G(batch, G, truncation_strategy: TruncationStrategy, truncation_level: float):
     z = torch.randn((batch["img"].shape[0], G.z_channels), device=batch["img"].device)
-    has_intermediate_latent = hasattr(G, "style_net") and hasattr(G.style_net, "E_map") and G.style_net.E_map.input_z
-    if truncation_strategy in [TruncationStrategy.W_CLAMP, TruncationStrategy.W_INTERPOLATE] and not has_intermediate_latent:
-        logger.warn("Setting truncation strategy to Z_CLAMP as the generator has no style net.")
+    if truncation_strategy in [TruncationStrategy.W_CLAMP, TruncationStrategy.W_INTERPOLATE] and not utils.has_intermediate_latent(G):
+        logger.warn_once("Setting truncation strategy to Z_CLAMP as the generator has no style net.")
         truncation_strategy = TruncationStrategy.Z_CLAMP
     if truncation_level is None:
         return G(**batch, z=z)

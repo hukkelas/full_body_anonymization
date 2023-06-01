@@ -1,4 +1,4 @@
-_base_config_ = ["../cse.py","../defaults.py"]
+_base_config_ = ["../coco_cse.py","../defaults.py"]
 
 dummy_anonymizer = True
 

@@ -18,6 +18,7 @@ def get_dataloader(cfg, is_train: bool):
     cpu_transform = build_transforms(cfg_data.cpu_transforms, imsize, False)
     dataset = build_dataset(cfg_data.dataset, imsize, cpu_transform, is_train=is_train)
     sampler = None
+    additional_kwargs = {}
     if is_train:
         sampler = InfiniteSampler(
             dataset, rank=utils.rank(),
@@ -25,16 +26,21 @@ def get_dataloader(cfg, is_train: bool):
             **cfg_data.sampler)
     elif utils.world_size() > 1:
         sampler = torch.utils.data.DistributedSampler(
-            dataset, **cfg_data.sampler)
+            dataset, **cfg_data.sampler, num_replicas=utils.world_size(), rank=utils.rank())
+        additional_kwargs["drop_last"] = cfg_data.sampler["drop_last"]
+    else:
+        additional_kwargs.update(cfg_data.sampler)
     dataloader = torch.utils.data.DataLoader(
-        dataset,
-        **cfg_data.loader,
-        sampler=sampler,
-        collate_fn=collate_fn
+        dataset, sampler=sampler, collate_fn=collate_fn,
+        **cfg_data.loader,**additional_kwargs,
     )
+    embed_map = None
+    if hasattr(dataset, "embed_map"):
+        embed_map = dataset.embed_map
     dataloader = DataPrefetcher(
         dataloader,
-        image_gpu_transforms=gpu_transform
+        image_gpu_transforms=gpu_transform,
+        embed_map=embed_map
     )
     return dataloader
 

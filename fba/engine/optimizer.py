@@ -4,12 +4,6 @@ from fba import logger
 
 optimizers = {"Adam": torch.optim.Adam}
 
-try:
-    from apex.optimizers import FusedAdam
-    optimizers["FusedAdam"] = FusedAdam
-except ImportError:
-    logger.warn("FusedAdam not imported. Install NVIDIA Apex to use this optimizer.")
-    pass
 
 
 def build_optimizers(

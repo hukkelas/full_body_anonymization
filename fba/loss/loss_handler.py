@@ -14,10 +14,7 @@ class LossHandler:
             gan_criterion: dict,
             gradient_penalty: dict,
             epsilon_penalty: dict,
-            feature_matching: dict,
-            gaussian_kl_loss: dict,
             lazy_reg_interval: int,
-            l1_loss: dict,
             scaler: torch.cuda.amp.GradScaler,
         ) -> None:
         self.gradient_step_D = 0
@@ -32,9 +29,6 @@ class LossHandler:
         self.gan_d_loss = build_criterion(gan_criterion.type + "_d_loss", gan_criterion)
         self.gan_g_loss = build_criterion(gan_criterion.type + "_g_loss", gan_criterion)
         self.EP_loss = build_criterion(epsilon_penalty.type, epsilon_penalty)
-        self.FM_loss = build_criterion(feature_matching.type, feature_matching)
-        self.gaussian_kl_loss = build_criterion(gaussian_kl_loss.type, gaussian_kl_loss)
-        self.l1_loss = build_criterion(l1_loss.type, l1_loss)
         self.r1_reg = "r1_regularization" in gradient_penalty.type 
 
     def D_loss(self, batch: dict):
@@ -62,7 +56,6 @@ class LossHandler:
                     assert loss.shape == (batch["img"].shape[0], ), loss.shape
                     total_loss += loss
 
-            # Discriminator feature loss
             if self.EP_loss is not None:
                 loss, log = self.EP_loss(D_out_real)
                 assert loss.shape == total_loss.shape
@@ -91,8 +84,6 @@ class LossHandler:
             # Forward through G and D
             with misc.ddp_sync(self.generator, True):
                 G_fake = self.generator(**batch)
-            with misc.ddp_sync(self.discriminator, False):
-                D_out_real = self.discriminator(**batch)
 
             D_out_fake = forward_D_fake(batch, G_fake["img"], self.discriminator)
             total_loss = 0
@@ -104,26 +95,5 @@ class LossHandler:
                     assert loss.shape == (batch["img"].shape[0], ), loss.shape
                     total_loss = total_loss + loss
 
-            # Discriminator feature loss
-            if self.FM_loss is not None:
-                with torch.autograd.profiler.record_function("G_loss_FM"):
-                    loss, log = self.FM_loss(D_out_real["features"], D_out_fake["features"])
-                    assert loss.shape == total_loss.shape
-                    to_log.update(log)
-                    total_loss = total_loss + loss
-
-            # KL Gaussian Loss
-            if self.gaussian_kl_loss is not None:
-                with torch.autograd.profiler.record_function("G_loss_KL"):
-                    loss, log = self.gaussian_kl_loss(G_fake["z_mu"], G_fake["z_logvar"])
-                    assert loss.shape == total_loss.shape
-                    total_loss = total_loss + loss
-                    to_log.update(log)
-            if self.l1_loss is not None:
-                with torch.autograd.profiler.record_function("l1_loss"):
-                    loss, log = self.l1_loss(batch["img"], G_fake["img"], batch["mask"])
-                    assert loss.shape == total_loss.shape
-                    total_loss = total_loss + loss
-                    to_log.update(log)
         to_log = {key: item.mean().detach() for key, item in to_log.items()}
         return total_loss.mean(), to_log

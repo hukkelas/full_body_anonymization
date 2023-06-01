@@ -64,7 +64,7 @@ def anonymize_image(image_path, output_path, visualize: bool, anonymizer, max_re
             if key == ord("q"):
                 break
             elif key == ord("u"):
-                im_ = anonymizer(np.array(im))
+                im_ = utils.image2np(anonymizer(im))
         return
     im = Image.fromarray(im_).convert(orig_im_mode)
     if save:

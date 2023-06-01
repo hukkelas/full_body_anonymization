@@ -8,8 +8,9 @@ from typing import Union, List, Tuple,Optional
 import torch
 from fba.utils import download_file
 from kornia.morphology import dilation
-from torchvision.transforms.functional import resize
+from torchvision.transforms.functional import resize, InterpolationMode
 from fba.utils import from_E_to_vertex
+from fba import utils
 
 TOPLEFT = 0
 BOTTOMOLEFT = 1
@@ -189,14 +190,16 @@ def draw_segmentation_masks(
         raise ValueError(f"The masks must be of dtype bool. Got {masks.dtype}")
     if masks.shape[-2:] != image.shape[-2:]:
         raise ValueError("The image and the masks must have the same height and width")
-
     num_masks = masks.size()[0]
+    if num_masks == 0:
+        return image
+    if not isinstance(colors[0], (Tuple, List)):
+        colors = [colors for i in range(num_masks)]
     if colors is not None and num_masks > len(colors):
         raise ValueError(f"There are more masks ({num_masks}) than colors ({len(colors)})")
 
     if colors is None:
         colors = _generate_color_palette(num_masks)
-
     if not isinstance(colors, list):
         colors = [colors]
     if not isinstance(colors[0], (tuple, str)):
@@ -210,9 +213,8 @@ def draw_segmentation_masks(
     for color in colors:
         if isinstance(color, str):
             color = ImageColor.getrgb(color)
-        color = torch.tensor(color, dtype=out_dtype)
+        color = torch.tensor(color, dtype=out_dtype, device=masks.device)
         colors_.append(color)
-
     img_to_draw = image.detach().clone()
     # TODO: There might be a way to vectorize this
     for mask, color in zip(masks, colors_):
@@ -316,17 +318,16 @@ def visualize_vertices_torch(vertices, segmentation):
     return colormap
 
 
-def crop_box(x: torch.Tensor, bbox_XYXY):
+def crop_box(x: torch.Tensor, bbox_XYXY) -> torch.Tensor:
     """
         Crops x by bbox_XYXY. 
     """
-    assert len(x.shape) == 3
     x0, y0, x1, y1 = bbox_XYXY
     x0 = max(x0, 0)
     y0 = max(y0, 0)
-    x1 = min(x1, x.shape[2])
-    y1 = min(y1, x.shape[1])
-    return x[:, y0:y1, x0:x1]
+    x1 = min(x1, x.shape[-1])
+    y1 = min(y1, x.shape[-2])
+    return x[..., y0:y1, x0:x1]
 
 
 def remove_pad(x: torch.Tensor, bbox_XYXY, imshape):
@@ -373,7 +374,7 @@ def draw_cse_all(
     """
         E_seg: 1 for areas with embedding
     """
-    assert len(im.shape) == 3
+    assert len(im.shape) == 3, im.shape
     assert im.dtype == torch.uint8
 
     N = len(E_seg)
@@ -387,13 +388,14 @@ def draw_cse_all(
         x0, y0, x1, y1 = boxes_XYXY[i]
         E = resize(E, (y1-y0, x1-x0), antialias=True)
         s = E_seg[i].float()
-        s = (resize(s[None], (y1-y0, x1-x0), antialias=True) > 0).float()
+        s = (resize(s.squeeze()[None], (y1-y0, x1-x0), antialias=True) > 0).float()
         vertices = from_E_to_vertex(E[None], 1 - s[None], embed_map)
         E_color = visualize_vertices_torch(vertices.squeeze(), s.squeeze())
         s = s.bool().repeat(3, 1, 1)
         box = boxes_XYXY[i]
         s = remove_pad(s, box, im.shape[1:])
-        E_color = remove_pad(E_color, box, im.shape[1:])
+        E_color = remove_pad(E_color[0], box, im.shape[1:])
+        E_color = E_color.to(im.device)
         crop_box(im, box)[s] = (crop_box(im, box)[s] * (1-t) + t * E_color[s]).byte()
     return im
 
@@ -404,6 +406,8 @@ def draw_mask(im: torch.Tensor, mask: torch.Tensor, t=0.2, color=(255, 255, 255)
         Supports multiple instances.
         mask shape: [N, C, H, W], where C is different instances in same image.
     """
+    orig_imshape = im.shape
+    if mask.numel() == 0: return im
     assert len(mask.shape) in (3, 4), mask.shape
     mask = mask.view(-1, *mask.shape[-3:])
     im = im.view(-1, *im.shape[-3:])
@@ -423,4 +427,31 @@ def draw_mask(im: torch.Tensor, mask: torch.Tensor, t=0.2, color=(255, 255, 255)
     im[mask] = (im[mask] * (1-t) + t * color[mask]).byte()
     im[outer_border] = 255
     im[inner_border] = 0
+    return im.view(*orig_imshape)
+
+
+def draw_cropped_masks(im: torch.Tensor, mask: torch.Tensor, boxes: torch.Tensor, **kwargs):
+    for i, box in enumerate(boxes):
+        x0, y0, x1, y1 = boxes[i]
+        orig_shape = (y1-y0, x1-x0)
+        m = resize(mask[i], orig_shape, InterpolationMode.NEAREST).squeeze()[None]
+        m = remove_pad(m, boxes[i], im.shape[-2:])
+        crop_box(im, boxes[i]).set_(draw_mask(crop_box(im, boxes[i]), m))
     return im
+
+def visualize_batch(
+        img: torch.Tensor, mask: torch.Tensor,
+        vertices: torch.Tensor=None, E_mask: torch.Tensor=None,
+        embed_map: torch.Tensor=None,
+        semantic_mask: torch.Tensor=None, **kwargs) -> torch.ByteTensor:
+    img = utils.denormalize_img(img).mul(255).byte()
+    img = draw_mask(img, mask)
+    if vertices is not None:
+        assert E_mask is not None
+        assert embed_map is not None
+        img = draw_cse(None, E_mask, img, embed_map, vertices)
+    elif semantic_mask is not None:
+        img = draw_segmentation_masks(img, semantic_mask)
+    return img
+    
+    

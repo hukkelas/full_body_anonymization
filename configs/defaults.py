@@ -41,12 +41,12 @@ random_seed = 0
 
 jit_transform = False
 data_train = dict(
-    loader=dict(num_workers=8, drop_last=True, pin_memory=False, batch_size=32),
+    loader=dict(num_workers=8, drop_last=True, pin_memory=True, batch_size=32, prefetch_factor=2),
     sampler=dict(drop_last=True, shuffle=True)
 )
 
 data_val = dict(
-    loader=dict(num_workers=8, pin_memory=False, batch_size=32),
+    loader=dict(num_workers=8, pin_memory=True, batch_size=32, prefetch_factor=2),
     sampler=dict(drop_last=True, shuffle=False)
 )
 
@@ -55,9 +55,6 @@ loss = dict(
     gan_criterion=dict(type="nsgan", weight=1),
     gradient_penalty=dict(type="r1_regularization", weight=5, mask_out=True),
     epsilon_penalty=dict(type="epsilon_penalty", weight=0.001),
-    feature_matching=dict(type="discriminator_feature_matching_loss", weight=0, resolutions=[16], ord="l1"),
-    gaussian_kl_loss=dict(type="gaussian_kl_loss", weight=0),
-    l1_loss=dict(type="l1_loss", weight=0),
 )
 
 generator = dict(
@@ -69,13 +66,18 @@ generator = dict(
     n_middle_blocks=2,
     z_channels=512,
     mask_output=True,
-    semantic_input_mode=None,
-    use_norm=False,
+    input_semantic=False,
     style_cfg=dict(type="NoneStyle"),
     embed_z=True,
     class_specific_z=False,
     conv_clamp=256,
     input_cse=False,
+    latent_space=None,
+    use_cse=True,
+    modulate_encoder=False,
+    norm_type="instance_norm_std",
+    norm_unet=False,
+    unet_skip="residual"
 )
 
 
@@ -87,5 +89,6 @@ discriminator = dict(
     input_condition=True,
     semantic_input_mode=None,
     conv_clamp=256,
-    input_cse=False
+    input_cse=False,
+    output_fpn=False,
 )

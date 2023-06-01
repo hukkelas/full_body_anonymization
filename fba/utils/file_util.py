@@ -116,12 +116,14 @@ def download_file(url, progress=True, check_hash=False, file_name=None, subdir=N
         torch.hub.download_url_to_file(url, cached_file, hash_prefix, progress=progress)
     return cached_file
 
-
+def torch_load_from_url(url, map_location=None, **kwargs):
+    filepath = download_file(url, **kwargs)
+    return torch.load(filepath, map_location=map_location)
 
 def is_image(impath: pathlib.Path):
     return impath.suffix.lower() in [".jpg", ".png", ".jpeg", ".bmp", ".webp"]
 
 
 def is_video(impath: pathlib.Path):
-    return impath.suffix.lower() in [".mp4", ".webm"]
+    return impath.suffix.lower() in [".mp4", ".webm", ".avi"]
 

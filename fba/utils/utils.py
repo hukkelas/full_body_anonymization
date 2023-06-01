@@ -46,15 +46,17 @@ def cache_embed_stats(embed_map: torch.Tensor):
 def get_embed_stats():
     fp = os.path.join(get_dir(), f"embed_map_stats.torch")
     if os.path.isfile(fp):
-        cache = torch.load(fp)
+        cache = torch.load(fp, map_location="cpu")
         return cache["mean"], cache["rstd"], cache["embed_map"]
     return None, None, None
 
 @contextmanager
 def timeit(desc):
     try:
+        torch.cuda.synchronize()
         t0 = time()
         yield
     finally:
+        torch.cuda.synchronize()
         print(f"({desc}) total time: {time() - t0:.1f}")
 

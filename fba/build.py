@@ -11,7 +11,6 @@ def build_discriminator(cfg):
         DISCRIMINATOR_REGISTRY,
         imsize=cfg.imsize,
         image_channels=cfg.image_channels,
-        semantic_nc=cfg.semantic_nc,
         cse_nc=cfg.cse_nc
         )
     discriminator = utils.to_cuda(discriminator)

@@ -1,7 +1,7 @@
 import torch
 import copy
 from fba import logger
-from .torch_utils import set_requires_grad
+from .torch_utils import set_requires_grad, to_cuda
 
 
 class EMA:
@@ -22,7 +22,10 @@ class EMA:
         self._rampup_nimg = rampup_nimg
         self._nimg_half_time = nimg_half_time
         self._batch_size = batch_size
-        self.generator = copy.deepcopy(generator).eval()
+        with torch.no_grad():
+            self.generator = copy.deepcopy(generator.cpu()).eval()
+            self.generator = to_cuda(self.generator)
+            to_cuda(generator)
         self.old_ra_beta = 0
         set_requires_grad(self.generator, False)
 

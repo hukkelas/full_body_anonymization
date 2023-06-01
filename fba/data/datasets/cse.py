@@ -28,6 +28,7 @@ class CocoCSE(torch.utils.data.Dataset):
         self.image_paths, self.embedding_paths = self._load_impaths()
         self.embed_map = torch.from_numpy(np.load(self.dirpath.joinpath("embed_map.npy")))
         cache_embed_stats(self.embed_map)
+
         logger.info(
             f"Dataset loaded from: {dirpath}. Number of samples:{len(self)}")
 
@@ -48,15 +49,15 @@ class CocoCSE(torch.utils.data.Dataset):
         vertices, mask, border = np.split(np.load(self.embedding_paths[idx]), 3, axis=-1)
         vertices = torch.from_numpy(vertices.squeeze()).long()
         mask = torch.from_numpy(mask.squeeze()).float()
-        border = torch.from_numpy(border.squeeze()).float()[None]
+        border = torch.from_numpy(border.squeeze()).float()
         E_mask = 1 - mask - border
         batch = {
             "img": im,
-            "vertices": vertices,
-            "mask": mask,
+            "vertices": vertices[None],
+            "mask": mask[None],
             "embed_map": self.embed_map,
-            "border": border,
-            "E_mask": E_mask
+            "border": border[None],
+            "E_mask": E_mask[None]
         }
         return self.transform(batch)
 
@@ -118,14 +119,16 @@ class CocoCSESemantic(torch.utils.data.Dataset):
         vertices, mask, border = np.split(np.load(self.embedding_paths[idx]), 3, axis=-1)
         vertices = torch.from_numpy(vertices.squeeze()).long()
         mask = torch.from_numpy(mask.squeeze()).float()
-        border = torch.from_numpy(border.squeeze()).float()[None]
+        border = torch.from_numpy(border.squeeze()).float()
+        E_mask = 1 - mask - border
         batch = {
             "img": im,
-            "vertices": vertices,
-            "mask": mask,
-            "border": border,
+            "vertices": vertices[None],
+            "mask": mask[None],
+            "border": border[None],
             "vertx2cat": self.vertx2cat,
             "embed_map": self.embed_map,
+            "E_mask": E_mask[None]
         }
         return self.transform(batch)
 

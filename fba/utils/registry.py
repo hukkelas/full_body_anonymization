@@ -1,6 +1,5 @@
 import inspect
 from functools import partial
-from fba import logger
 
 
 class Registry(object):
@@ -72,5 +71,4 @@ def build_from_cfg(_cfg, registry, **kwargs):
     try:
         return obj_cls(**args, **kwargs)
     except TypeError as e:
-        logger.warn("Could not build: ", str(_cfg))
         raise e

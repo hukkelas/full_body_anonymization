@@ -1,3 +1,4 @@
+from pathlib import Path
 from fba.utils import Registry, build_from_cfg
 
 HOOK_REGISTRY = Registry("HOOKS")
@@ -5,11 +6,13 @@ HOOK_REGISTRY = Registry("HOOKS")
 
 def build_hooks(cfg, trainer):
     hooks = cfg.hooks
+    cache_directory = Path(cfg.data_root, "metric_cache")
+    cache_directory.mkdir(exist_ok=True, parents=True)
     for _hook in hooks.values():
         if _hook is None:
             continue
         hook = build_from_cfg(
-            _hook, HOOK_REGISTRY, semantic_labels=cfg.semantic_labels, fid_real_directory=cfg.fid_real_directory)
+            _hook, HOOK_REGISTRY, semantic_labels=cfg.semantic_labels, cache_directory=cache_directory)
         trainer.register_hook(_hook.type, hook)
 
 

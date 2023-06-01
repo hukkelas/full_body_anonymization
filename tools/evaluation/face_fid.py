@@ -6,9 +6,23 @@ from fba.config import Config
 import torch_fidelity
 from fba.data import build_dataloader_val
 from fba.infer import build_trained_generator
-from fba.metrics.torch_metrics import ImageIteratorWrapper, lpips
+from fba.metrics.torch_metrics import lpips
 import torch.nn.functional as F
 import tqdm
+from torch_fidelity.generative_model_modulewrapper import GenerativeModelModuleWrapper
+
+class ImageIteratorWrapper(GenerativeModelModuleWrapper):
+
+    def __init__(self, images):
+        super().__init__(torch.nn.Module(), 1, "normal", 0)
+        self.images = images
+        self.it = 0
+
+    @torch.no_grad()
+    def forward(self, z, **kwargs):
+        self.it += 1
+        return self.images[self.it-1].to(utils.get_device())
+
 
 @torch.no_grad()
 def calculate_face_metrics(G, dataloader):
@@ -74,7 +88,7 @@ def main(config_path):
 if __name__ == "__main__":
     if os.environ.get("AMP_ENABLED") is None:
         print("AMP not set. setting to True")
-        os.environ["AMP_ENABLED"] = "1"
+        os.environ["AMP_ENABLED"] = "0"
     else:
         assert os.environ["AMP_ENABLED"] in ["0", "1"]
     main()

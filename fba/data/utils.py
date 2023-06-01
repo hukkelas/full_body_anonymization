@@ -21,9 +21,11 @@ class DataPrefetcher:
 
     def __init__(self,
                  loader: torch.utils.data.DataLoader,
-                 image_gpu_transforms: torch.nn.Module):
+                 image_gpu_transforms: torch.nn.Module,
+                 embed_map=None):
         self.original_loader = loader
         self.stream = None
+        self.embed_map = to_cuda(embed_map)
         if torch.cuda.is_available():
             self.stream = torch.cuda.Stream(device=get_device())
         self.loader = iter(self.original_loader)
@@ -41,11 +43,14 @@ class DataPrefetcher:
         with cuda_stream_wrap(self.stream):
             for key, item in self.container.items():
                 self.container[key] = to_cuda(item).float()
+            if "E_mask" in self.container:
+                self.container["border"] = 1 - self.container["mask"] - self.container["E_mask"]
             if "mask" in self.container:
                 mask = self.container["mask"]
                 mask = mask.view(mask.shape[0], 1, mask.shape[-2], mask.shape[-1])
                 self.container["mask"] = mask
             self.container["img"] = self.container["img"] / 255
+            self.container["embed_map"] = self.embed_map.clone()
             self.container = self.image_gpu_transforms(self.container)
 
     def __len__(self):
@@ -73,7 +78,13 @@ class DataPrefetcher:
     def batch_size(self):
         return self.original_loader.batch_size
 
+    @property
+    def drop_last(self):
+        return self.original_loader.drop_last or self.original_loader.sampler.drop_last
 
+    @property
+    def shuffle(self):
+        return self.original_loader.shuffle
 
 #----------------------------------------------------------------------------
 # Sampler for torch.utils.data.DataLoader that loops over the dataset

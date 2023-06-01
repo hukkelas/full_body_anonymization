@@ -66,17 +66,20 @@ class SemanticStyleEncoder(nn.Module):
 
 class SPADEOut(nn.Module):
 
-    def __init__(self, semantic_nc, num_features, nhidden, **kwargs):
+    def __init__(self, semantic_nc, num_features, nhidden, only_gamma=True, **kwargs):
         super().__init__()
-        self.mlp_shared = Conv2dLayer(semantic_nc, nhidden, None, resolution=None)
+        self.only_gamma = only_gamma
+        self.mlp_shared = Conv2dLayer(semantic_nc, nhidden, resolution=None)
         self.mlp = Conv2dLayer(
-            nhidden, num_features*2, None, resolution=None, activation="linear",
+            nhidden, num_features*(int(not only_gamma)+1), resolution=None, activation="linear",
             kernel_size=1
             )
 
     def forward(self, semantic_mask, **kwargs):
         actv = self.mlp_shared(semantic_mask)
-        actv = self.mlp(actv.float())
+        actv = self.mlp(actv)
+        if self.only_gamma:
+            return actv + 1, None
         gamma, beta = actv.chunk(2, dim=1)
 
         # Fix initialization issues from original authors.
@@ -84,35 +87,41 @@ class SPADEOut(nn.Module):
 
 
 class CLADEOut(nn.Module):
-    def __init__(self, semantic_nc, num_features, **kwargs):
+    def __init__(self, semantic_nc, num_features, only_gamma=True, **kwargs):
         super().__init__()
         self.semantic_nc = semantic_nc
         self.num_features = num_features
-        self.gamma = Conv2dLayer(self.semantic_nc, self.num_features, None, None, kernel_size=1, activation="linear", bias=False)
+        self.only_gamma = only_gamma
+
+        self.gamma = Conv2dLayer(self.semantic_nc, self.num_features, None, kernel_size=1, activation="linear", bias=False)
         nn.init.constant_(self.gamma.weight, np.sqrt(self.semantic_nc))
-        self.beta = Conv2dLayer(self.semantic_nc, self.num_features, None, None, kernel_size=1, activation="linear", bias=False)
-        nn.init.constant_(self.beta.weight, 0.0)
+        if not self.only_gamma:
+            self.beta = Conv2dLayer(self.semantic_nc, self.num_features, None, kernel_size=1, activation="linear", bias=False)
+            nn.init.constant_(self.beta.weight, 0.0)
 
     def forward(self, segmap, **kwargs):
-        with torch.cuda.amp.autocast(enabled=False):
-            gamma = self.gamma(segmap)
-            beta = self.beta(segmap)
+        gamma = self.gamma(segmap) + 1
+        if self.only_gamma:
+            return gamma, None
+        beta = self.beta(segmap)
         return gamma.float() + 1, beta
 
+
 class ClassINADEOut(nn.Module):
-    def __init__(self, semantic_nc, num_features, z_channels, **kwargs):
+    def __init__(self, semantic_nc, num_features, z_channels, only_gamma=True, **kwargs):
         super().__init__()
         self.semantic_nc = semantic_nc
         self.num_features = num_features
-        self.a = Conv2dLayer(self.semantic_nc, self.num_features*2, None, None, kernel_size=1, activation="linear", bias=False)
+        self.only_gamma=only_gamma
+        self.a = Conv2dLayer(self.semantic_nc, self.num_features*(1+int(not only_gamma)), None, kernel_size=1, activation="linear", bias=False)
         # Init a to normal distributed since segmap is one-hot
         nn.init.normal_(self.a.weight)
         self.a.weight_gain = 1 # Gain is 1 because one-hot semantic 
-        self.b = Conv2dLayer(self.semantic_nc, self.num_features*2, None, None, kernel_size=1, activation="linear", bias=False)
+        self.b = Conv2dLayer(self.semantic_nc, self.num_features*(1+int(not only_gamma)), None, kernel_size=1, activation="linear", bias=False)
         nn.init.constant_(self.b.weight, 0.0)
 
         self.noise_affine = Conv2dLayer(
-            z_channels, num_features*2, None, resolution=None, activation="linear",
+            z_channels, num_features*(1+int(not only_gamma)), resolution=None, activation="linear",
             kernel_size=1
             )
 
@@ -123,5 +132,7 @@ class ClassINADEOut(nn.Module):
         actv = self.a(segmap)
         actv = actv * z 
         actv = actv + self.b(segmap)
+        if self.only_gamma:
+            return actv + 1, None
         gamma, beta = actv.chunk(2, dim=1)
         return gamma.float()+1, beta

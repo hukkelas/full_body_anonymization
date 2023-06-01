@@ -1,6 +1,8 @@
 
 import logging
 import tempfile
+from torch_utils import misc
+from fba.utils import torch_utils
 from torch_utils.ops import conv2d_gradfix, grid_sample_gradfix
 import warnings
 import traceback
@@ -27,10 +29,10 @@ def start_train(rank, world_size, debug, cfg_path, temp_dir):
         torch.backends.cudnn.deterministic = True
         torch.set_printoptions(precision=10)
     else:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
         conv2d_gradfix.enabled = False
-        grid_sample_gradfix.enabled = False
+        grid_sample_gradfix.enabled = True
     if world_size > 1:
 #        os.environ['MASTER_ADDR'] = 'localhost'
 #        os.environ['MASTER_PORT'] = '12355'
@@ -69,12 +71,12 @@ def start_train(rank, world_size, debug, cfg_path, temp_dir):
         generator = torch.nn.parallel.DistributedDataParallel(generator, device_ids=[rank], broadcast_buffers=False)
         discriminator = torch.nn.parallel.DistributedDataParallel(discriminator, device_ids=[rank], broadcast_buffers=False)
 
-    grad_scaler = torch.cuda.amp.GradScaler(enabled=utils.AMP(), init_scale=4096)
+    
+    grad_scaler = torch.cuda.amp.GradScaler(enabled=utils.AMP(), init_scale=2**16, growth_factor=4, growth_interval=100,)
 
     G_optimizer, D_optimizer = engine.build_optimizers(
         generator, discriminator, **cfg.optimizer
     )
-
 
     loss_fnc = build_losss_fnc(
         cfg.loss, discriminator=discriminator, generator=generator,

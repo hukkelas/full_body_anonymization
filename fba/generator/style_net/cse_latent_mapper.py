@@ -1,13 +1,15 @@
+import torch
 import torch.nn.functional as F
 import tqdm
-import torch
+from fba import logger, utils
 from fba.layers import Module
+from fba.layers.stylegan2_layers import (Conv2dLayer, FullyConnectedLayer,
+                                         normalize_2nd_moment)
 from fba.utils.utils import get_embed_stats
-from fba.layers.stylegan2_layers import Conv2dLayer, FullyConnectedLayer, normalize_2nd_moment
 from torch import nn
-from fba import logger
-from .build import STYLE_ENCODER_REGISTRY
 from torch_utils.misc import assert_shape
+
+from .build import STYLE_ENCODER_REGISTRY
 
 
 class CSELatentMapper(Module):
@@ -17,8 +19,8 @@ class CSELatentMapper(Module):
             hidden_dim=512,
             out_dim=512,
             n_layer_combined=6,
-            n_layer_z=1,
-            n_layer_e=1,
+            n_layer_z=3,
+            n_layer_e=2,
             activation='lrelu',  # Activation function: 'relu', 'lrelu', etc.
             lr_multiplier=1,     # Learning rate multiplier for the mapping layers.
             lr_z=1,
@@ -28,7 +30,7 @@ class CSELatentMapper(Module):
             n_vertices=27554,
             residual=True,
             ema_beta=0.995,
-            has_trained_ema=True
+            has_trained_ema=True,
             ):
         super().__init__()
         self.E_dim = E_dim
@@ -49,7 +51,7 @@ class CSELatentMapper(Module):
             self.register_buffer("E", torch.zeros(n_vertices, E_dim))
         else:
             E = (E-E_mean)*E_rstd
-            self.register_buffer("E", E)
+            self.register_buffer("E", E.detach())
         assert self.E.shape == (n_vertices, E_dim), ((n_vertices, E_dim), self.E.shape)
         for i in range(n_layer_e):
             layer = FullyConnectedLayer(E_dim, hidden_dim, lr_multiplier=lr_multiplier, activation=activation)
@@ -154,28 +156,36 @@ class CSEStyleMapper(Module):
             w_mapper: dict,
             cse_nc: int,
             z_channels: int,
-            modulate_middle=True,
-            modulate_encoder=True,
+            included_features=None,
              **kwargs
             ):
         super().__init__()
-        self.modulate_middle = modulate_middle
         self.feature_sizes_dec = list(feature_sizes_dec)
         self.feature_size_mid = feature_sizes_mid
         self.feature_size_enc = feature_sizes_enc
-        self.modulate_encoder = modulate_encoder
         self.E_map = CSELatentMapper(E_dim=cse_nc, z_channels=z_channels, **w_mapper)
         self.global_mask = Conv2dLayer(
-            self.E_map.out_dim + 3, self.E_map.out_dim, None, None,
+            self.E_map.out_dim + 3, self.E_map.out_dim, None,
             kernel_size=1, bias=False
         )
+        if included_features is None:
+            included_features = [True for i in range(len(feature_sizes_dec)+len(feature_sizes_enc)+len(feature_sizes_mid))]
+        assert len(included_features) == len(feature_sizes_dec)+len(feature_sizes_enc)+len(feature_sizes_mid)
         self.global_mask.weight[:, -3:].data.fill_(0)
-        self.dec_layers = [CSELinear(self.E_map.out_dim, shape[0], **kwargs) for shape in self.feature_sizes_dec]
-        self.dec_layers = nn.ModuleList(self.dec_layers)
-        if self.modulate_middle:
-            self.mid_layers = nn.ModuleList([CSELinear(self.E_map.out_dim, shape[0], **kwargs) for shape in feature_sizes_mid])
-        if self.modulate_encoder:
-            self.enc_layers = nn.ModuleList([CSELinear(self.E_map.out_dim, shape[0], **kwargs) for shape in feature_sizes_enc])
+        self.dec_layers = nn.ModuleList(
+            [CSELinear(self.E_map.out_dim, shape[0], **kwargs)
+             for idx, shape in enumerate(self.feature_sizes_dec)
+             if included_features[len(feature_sizes_enc)+len(feature_sizes_mid) + idx]])
+        self.mid_layers = nn.ModuleList(
+            [CSELinear(self.E_map.out_dim, shape[0], **kwargs)
+             for idx, shape in enumerate(feature_sizes_mid)
+             if included_features[idx+len(feature_sizes_enc)]])
+
+        self.enc_layers = nn.ModuleList(
+            [CSELinear(self.E_map.out_dim, shape[0], **kwargs)
+             for idx, shape in enumerate(feature_sizes_enc) if included_features[idx]])
+        self.included_features = included_features
+        self.min_fmap_H = min([_[1] for _ in feature_sizes_enc+feature_sizes_dec+feature_sizes_mid])
 
     def forward(self, embedding, mask, border, z, vertices, w, update_ema, **kwargs):
         modulation_params = []
@@ -186,41 +196,58 @@ class CSEStyleMapper(Module):
         E_mask = 1 - mask - border
         x = torch.cat((embedding*E_mask, mask, border, E_mask), dim=1)
         embedding = self.global_mask(x)
-        if self.modulate_encoder:
-            for shape, layer in zip(self.feature_size_enc, self.enc_layers):
-                assert embedding.shape[2] >= shape[1], (embedding.shape, shape)
-                assert embedding.shape[3] >= shape[2]
-                if embedding.shape[2] != shape[1]:
-                    embedding = F.interpolate(embedding, scale_factor=.5, mode="bilinear", recompute_scale_factor=False, align_corners=True)
-                embeddings_[tuple(shape[1:])] = dict(embedding=embedding)
-                gamma, beta = layer(**embeddings_[tuple(shape[1:])])
-                modulation_params.append({"gamma": gamma, "beta": beta})
-        else:
-            modulation_params.extend([{}]*len(self.feature_size_enc))
-        if self.modulate_middle:
-            for shape, layer in zip(self.feature_size_mid, self.mid_layers):
-                gamma, beta = layer(**embeddings_[tuple(shape[1:])])
-                modulation_params.append({"gamma": gamma, "beta": beta})
-        else:
-            modulation_params.extend([{}]*len(self.feature_size_mid))
-        for shape, layer in zip(self.feature_sizes_dec, self.dec_layers):
+        layer_idx = 0
+        while True:
+            embeddings_[tuple(embedding.shape[2:])] = dict(embedding=embedding)
+            if embedding.shape[2] == self.min_fmap_H:
+                break
+            embedding = F.interpolate(embedding, scale_factor=.5, mode="bilinear", recompute_scale_factor=False, align_corners=True)
+
+        for feat_i, shape in enumerate(self.feature_size_enc):
+            if not self.included_features[feat_i]:
+                modulation_params.append({"gamma": None, "beta": None})
+                continue
+            layer = self.enc_layers[layer_idx]
+            layer_idx += 1
+            gamma, beta = layer(**embeddings_[tuple(shape[1:])])
+            modulation_params.append({"gamma": gamma, "beta": beta})
+        layer_idx = 0
+        for feat_i, shape in enumerate(self.feature_size_mid):
+            if not self.included_features[len(self.feature_size_enc)+feat_i]:
+                modulation_params.append({"gamma": None, "beta": None})
+                continue
+            layer = self.mid_layers[layer_idx]
+            layer_idx += 1
+            gamma, beta = layer(**embeddings_[tuple(shape[1:])])
+            modulation_params.append({"gamma": gamma, "beta": beta})
+        layer_idx = 0
+        for feat_i, shape in enumerate(self.feature_sizes_dec):
+            if not self.included_features[len(self.feature_size_enc)+len(self.feature_size_mid)+feat_i]:
+                modulation_params.append({"gamma": None, "beta": None})
+                continue
+            layer = self.dec_layers[layer_idx]
+            layer_idx += 1
             gamma, beta = layer(**embeddings_[tuple(shape[1:])])
             modulation_params.append({"gamma": gamma, "beta": beta})
         return modulation_params
 
 
 class CSELinear(nn.Module):
-    def __init__(self, w_dim, num_features, **kwargs):
+    def __init__(self, w_dim, num_features, only_gamma=True, **kwargs):
         super().__init__()
         self.w_dim = w_dim
+        out_channels = num_features + (not only_gamma) * num_features
+        self.only_gamma = only_gamma
         self.mlp = Conv2dLayer(
-            w_dim, num_features*2, None, resolution=None, activation="linear",
-            kernel_size=1, bias=True
+            w_dim, out_channels, resolution=None, activation="linear",
+            kernel_size=1, bias=True, bias_init=1 if only_gamma else 0
         )
 
     def forward(self, embedding):
+        if self.only_gamma:
+            return self.mlp(embedding), None
         gamma, beta = self.mlp(embedding).chunk(2, dim=1)
-        return gamma.float()+1, beta
+        return gamma+1, beta
 
 
 @STYLE_ENCODER_REGISTRY.register_module
@@ -238,7 +265,7 @@ class UnconditionalCSEStyleMapper(Module):
         self.feature_sizes_dec = list(feature_sizes_dec)
         self.E_map = CSELatentMapper(E_dim=cse_nc, z_channels=z_channels, **w_mapper)
         self.global_mask = Conv2dLayer(
-            self.E_map.out_dim + 2, self.E_map.out_dim, None, None,
+            self.E_map.out_dim + 2, self.E_map.out_dim, None,
             kernel_size=1, bias=False
         )
         self.global_mask.weight[:, -2:].data.fill_(0)

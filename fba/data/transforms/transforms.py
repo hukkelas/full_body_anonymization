@@ -159,15 +159,11 @@ class CreateEmbedding(torch.nn.Module):
     def forward(self, container: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         embed_map = container["embed_map"]
         vertices = container["vertices"]
-        embedding = embed_map[vertices.long().squeeze()]
-        if len(vertices.shape) == 2:
-            embedding = embedding.permute(2, 0, 1)
-        else:
-            embedding = embedding.permute(0, 3, 1, 2)
+        embedding = embed_map[vertices.long()].squeeze(dim=1)
 
-        container["embedding"] = embedding
+        embedding = embedding.permute(0, 3, 1, 2)
+        container["embedding"] = embedding * container["E_mask"]
         return container
-
 
 
 @TRANSFORM_REGISTRY.register_module

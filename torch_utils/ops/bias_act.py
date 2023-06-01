@@ -17,7 +17,7 @@ import traceback
 
 from .. import custom_ops
 from .. import misc
-
+from torch.cuda.amp import custom_bwd, custom_fwd
 #----------------------------------------------------------------------------
 
 activation_funcs = {
@@ -39,6 +39,7 @@ _plugin = None
 _null_tensor = torch.empty([0])
 
 def _init():
+    return False
     global _inited, _plugin
     if not _inited:
         _inited = True
@@ -144,6 +145,7 @@ def _bias_act_cuda(dim=1, act='linear', alpha=None, gain=None, clamp=None):
     # Forward op.
     class BiasActCuda(torch.autograd.Function):
         @staticmethod
+        @custom_fwd(cast_inputs=torch.float16)
         def forward(ctx, x, b): # pylint: disable=arguments-differ
             ctx.memory_format = torch.channels_last if x.ndim > 2 and x.stride()[1] == 1 else torch.contiguous_format
             x = x.contiguous(memory_format=ctx.memory_format)
@@ -158,6 +160,7 @@ def _bias_act_cuda(dim=1, act='linear', alpha=None, gain=None, clamp=None):
             return y
 
         @staticmethod
+        @custom_bwd
         def backward(ctx, dy): # pylint: disable=arguments-differ
             dy = dy.contiguous(memory_format=ctx.memory_format)
             x, b, y = ctx.saved_tensors
@@ -177,6 +180,7 @@ def _bias_act_cuda(dim=1, act='linear', alpha=None, gain=None, clamp=None):
     # Backward op.
     class BiasActCudaGrad(torch.autograd.Function):
         @staticmethod
+        @custom_fwd(cast_inputs=torch.float16)
         def forward(ctx, dy, x, b, y): # pylint: disable=arguments-differ
             ctx.memory_format = torch.channels_last if dy.ndim > 2 and dy.stride()[1] == 1 else torch.contiguous_format
             dx = _plugin.bias_act(dy, b, x, y, _null_tensor, 1, dim, spec.cuda_idx, alpha, gain, clamp)
@@ -186,6 +190,7 @@ def _bias_act_cuda(dim=1, act='linear', alpha=None, gain=None, clamp=None):
             return dx
 
         @staticmethod
+        @custom_bwd
         def backward(ctx, d_dx): # pylint: disable=arguments-differ
             d_dx = d_dx.contiguous(memory_format=ctx.memory_format)
             dy, x, b, y = ctx.saved_tensors

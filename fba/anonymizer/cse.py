@@ -94,7 +94,6 @@ class CSEDetector:
         assert im.dtype == torch.uint8
         if self.input_format == "BGR":
             im = im.flip(0)
-        im = im.flip(0)
         H, W = im.shape[1:]
         im = self.resize_im(im)
         output = self.model([{"image": im, "height": H, "width": W}])[0]["instances"]

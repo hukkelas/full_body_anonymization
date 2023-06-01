@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import math
 import logging
-import collections
+import functools
 try:
     import wandb
 except ImportError:
@@ -28,16 +28,18 @@ class DefaultLogger:
     def save_images(self, tag, images,
                     nrow=10,
                     denormalize=True):
-        if denormalize:
-            images = utils.denormalize_img(images)
         imdir = image_dir
         filename = f"{global_step}.jpg"
 
         filepath = imdir.joinpath(tag, filename)
-
-        grid = torchvision.utils.make_grid(images, nrow=nrow, padding=0)
-        grid = (grid * 255 + 0.5).clamp(0, 255).permute(1, 2, 0)
-        grid = grid.to("cpu", torch.uint8).numpy()
+        if images.dtype != torch.uint8:
+            if denormalize:
+                images = utils.denormalize_img(images)
+            grid = torchvision.utils.make_grid(images, nrow=nrow, padding=0)
+            grid = (grid * 255 + 0.5).clamp(0, 255).permute(1, 2, 0)
+            grid = grid.to("cpu", torch.uint8).numpy()
+        else:
+            grid = torchvision.utils.make_grid(images, nrow, padding=0).permute(1, 2, 0).cpu().numpy()
         filepath.parent.mkdir(exist_ok=True, parents=True)
         info(f"Saved images to: {filepath}")
         im = Image.fromarray(grid)
@@ -213,6 +215,10 @@ def log(log_level, text):
 
     text = f"[{global_step:7d}]: {text}"
     rootLogger.log(log_level, text)
+
+@functools.lru_cache(1)
+def warn_once(text):
+    warn(text)
 
 
 def warn(text, *args):

@@ -169,7 +169,7 @@ class StyleGANAugmentPipe(torch.nn.Module):
 
     def forward(self, batch, debug_percentile=None):
         images = batch["img"]
-        batch["vertices"] = batch["vertices"][:, None].float()
+        batch["vertices"] = batch["vertices"].float()
         assert isinstance(images, torch.Tensor) and images.ndim == 4
         batch_size, num_channels, height, width = images.shape
         device = images.device
@@ -261,14 +261,14 @@ class StyleGANAugmentPipe(torch.nn.Module):
             # Pad image and adjust origin.
             images = torch.nn.functional.pad(input=images, pad=[mx0,mx1,my0,my1], mode='reflect')
             batch["mask"]  = torch.nn.functional.pad(input=batch["mask"], pad=[mx0,mx1,my0,my1], mode='constant', value=1.0)
-            batch["border"]  = torch.nn.functional.pad(input=batch["border"], pad=[mx0,mx1,my0,my1], mode='constant', value=0.0)
+            batch["E_mask"]  = torch.nn.functional.pad(input=batch["E_mask"], pad=[mx0,mx1,my0,my1], mode='constant', value=0.0)
             batch["vertices"]  = torch.nn.functional.pad(input=batch["vertices"], pad=[mx0,mx1,my0,my1], mode='constant', value=0.0)
             G_inv = translate2d((mx0 - mx1) / 2, (my0 - my1) / 2) @ G_inv
 
             # Upsample.
             images = upfirdn2d.upsample2d(x=images, f=self.Hz_geom, up=2)
             batch["mask"] = torch.nn.functional.interpolate(batch["mask"], scale_factor=2, mode="nearest")
-            batch["border"] = torch.nn.functional.interpolate(batch["border"], scale_factor=2, mode="nearest")
+            batch["E_mask"] = torch.nn.functional.interpolate(batch["E_mask"], scale_factor=2, mode="nearest")
             batch["vertices"] = torch.nn.functional.interpolate(batch["vertices"], scale_factor=2, mode="nearest")
             G_inv = scale2d(2, 2, device=device) @ G_inv @ scale2d_inv(2, 2, device=device)
             G_inv = translate2d(-0.5, -0.5, device=device) @ G_inv @ translate2d_inv(-0.5, -0.5, device=device)
@@ -281,15 +281,16 @@ class StyleGANAugmentPipe(torch.nn.Module):
             
             batch["mask"] = torch.nn.functional.grid_sample(
                 input=batch["mask"], grid=grid, mode='nearest', padding_mode="border", align_corners=False)
-            batch["border"] = torch.nn.functional.grid_sample(
-                input=batch["border"], grid=grid, mode='nearest', padding_mode="border", align_corners=False)
+            batch["E_mask"] = torch.nn.functional.grid_sample(
+                input=batch["E_mask"], grid=grid, mode='nearest', padding_mode="border", align_corners=False)
             batch["vertices"] = torch.nn.functional.grid_sample(
                 input=batch["vertices"], grid=grid, mode='nearest', padding_mode="border", align_corners=False)
+            
 
             # Downsample and crop.
             images = upfirdn2d.downsample2d(x=images, f=self.Hz_geom, down=2, padding=-Hz_pad*2, flip_filter=True)
             batch["mask"] = torch.nn.functional.interpolate(batch["mask"][:, :, Hz_pad*2:-Hz_pad*2, Hz_pad*2:-Hz_pad*2], scale_factor=.5, mode="nearest", recompute_scale_factor=False)
-            batch["border"] = torch.nn.functional.interpolate(batch["border"][:, :, Hz_pad*2:-Hz_pad*2, Hz_pad*2:-Hz_pad*2], scale_factor=.5, mode="nearest", recompute_scale_factor=False)
+            batch["E_mask"] = torch.nn.functional.interpolate(batch["E_mask"][:, :, Hz_pad*2:-Hz_pad*2, Hz_pad*2:-Hz_pad*2], scale_factor=.5, mode="nearest", recompute_scale_factor=False)
             batch["vertices"] = torch.nn.functional.interpolate(batch["vertices"][:, :, Hz_pad*2:-Hz_pad*2, Hz_pad*2:-Hz_pad*2], scale_factor=.5, mode="nearest", recompute_scale_factor=False)
         # --------------------------------------------
         # Select parameters for color transformations.
@@ -388,6 +389,6 @@ class StyleGANAugmentPipe(torch.nn.Module):
         # Image-space corruptions.
         # ------------------------
         batch["img"] = images
-        batch["vertices"] = batch["vertices"].squeeze()
-
+        batch["vertices"] = batch["vertices"].long()
+        batch["border"] = 1 - batch["E_mask"] - batch["mask"]
         return batch

@@ -4,7 +4,6 @@ from skimage.morphology import disk
 from torchvision.transforms.functional import resize, InterpolationMode
 from functools import lru_cache
 from fba import utils
-from .ops import binary_dilation
 
 
 @lru_cache(maxsize=200)

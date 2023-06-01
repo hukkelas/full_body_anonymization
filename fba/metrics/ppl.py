@@ -1,16 +1,13 @@
-import click
 import numpy as np
 import torch
-from fba import utils, logger
-from fba.config import Config
-from fba.data import build_dataloader_val
-from fba.infer import build_trained_generator
+from fba import utils
 from torch_fidelity.helpers import get_kwarg, vassert, vprint
 from torch_fidelity.utils import sample_random, batch_interp, create_sample_similarity
 
 KEY_METRIC_PPL_RAW = 'perceptual_path_length_raw'
 KEY_METRIC_PPL_MEAN = 'perceptual_path_length_mean'
 KEY_METRIC_PPL_STD = 'perceptual_path_length_std'
+
 
 def slerp(a, b, t):
     a = a / a.norm(dim=-1, keepdim=True)
@@ -26,10 +23,12 @@ def slerp(a, b, t):
 
 @torch.no_grad()
 def calculate_ppl(
-    dataloader, 
-    G,
-    space,
-    **kwargs):
+        dataloader, 
+        G,
+        space = None,
+        **kwargs):
+    if space is None:
+        space = "W" if utils.has_intermediate_latent(G) else "Z"
     """
     Inspired by https://github.com/NVlabs/stylegan/blob/master/metrics/perceptual_path_length.py
     """
@@ -68,27 +67,28 @@ def calculate_ppl(
         lat_e1 = sample_random(rng, (num_samples, G.z_channels), "normal")
     if space == "Z":
         lat_e1 = batch_interp(lat_e0, lat_e1, epsilon, interp)
-
+    print("USING SPACE:", space)
     distances = []
     for it, batch in enumerate(utils.tqdm_(dataloader, desc="Perceptual Path Length")):
         start = it*dataloader.batch_size
         end = start + batch["img"].shape[0]
-        batch = {k: torch.cat((x, x)) for k, x in batch.items()}
         batch_lat_e0 = utils.to_cuda(lat_e0[start:end])
         batch_lat_e1 = utils.to_cuda(lat_e1[start:end])
         if G.class_specific_z:
             batch_lat_e0 = batch_lat_e0.view(-1, G.semantic_nc, G.z_channels)
             batch_lat_e1 = batch_lat_e1.view(-1, G.semantic_nc, G.z_channels)
         if space == "W":
-            w0, w1 = G.style_net.E_map.map_network(torch.cat((batch_lat_e0, batch_lat_e1))).chunk(2)
+            w0, w1 = G.get_w(torch.cat((batch_lat_e0, batch_lat_e1))).chunk(2)
             w1 = w0.lerp(w1, epsilon) # PPL end
-            img = G(**batch, w=torch.cat((w0, w1)))["img"]
+            utils.set_seed(it) # Set seed for comod dropout
+            rgb1 = G(**batch, w=w0)["img"]
+            utils.set_seed(it)
+            rgb2 = G(**batch, w=w1)["img"]
         else:
-            assert space == "Z"
-            img = G(**batch, z=torch.cat((batch_lat_e0, batch_lat_e1)))["img"]
-
-        rgb1, rgb2 = (utils.denormalize_img(img)*255).byte().chunk(2)
-        
+            rgb1 = G(**batch, z=batch_lat_e0)["img"]
+            rgb2 = G(**batch, z=batch_lat_e1)["img"]
+        rgb1 = utils.denormalize_img(rgb1).mul(255).byte()
+        rgb2 = utils.denormalize_img(rgb2).mul(255).byte()
 
         sim = sample_similarity(rgb1, rgb2)
         dist_lat_e01 = sim / (epsilon ** 2)
@@ -115,29 +115,4 @@ def calculate_ppl(
 
     vprint(verbose, f'Perceptual Path Length: {out[KEY_METRIC_PPL_MEAN]} ± {out[KEY_METRIC_PPL_STD]}')
 
-    return out
-
-@click.command()
-@click.argument("config_path")
-def main(config_path):
-    cfg = Config.fromfile(config_path)
-    space = "Z"
-    if hasattr(cfg.generator.style_cfg, "w_mapper"):
-        cfg.generator.style_cfg.w_mapper.normalize_z = False
-        if cfg.generator.style_cfg.w_mapper.input_z:
-            space = "W"
-    print("USING SPACE:", space)
-    G, global_step = build_trained_generator(cfg)
-    cfg.data_val.loader.batch_size = 4
-    dl = build_dataloader_val(cfg)
-    
-    ppl = calculate_ppl(dl, G, space=space)
-    ppl = {f"ppl/{k}": v for k,v in ppl.items()}
-    logger.init(cfg, resume=True)
-    logger.update_global_step(global_step)
-    logger.log_dictionary(ppl)
-    logger.finish()
-
-
-if __name__ == "__main__":
-    main()
+    return {"ppl/mean": out[KEY_METRIC_PPL_MEAN], "ppl/std": out[KEY_METRIC_PPL_STD]}

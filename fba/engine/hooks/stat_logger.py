@@ -3,8 +3,8 @@ import torch
 import typing
 import datetime
 from fba import logger, metrics, utils
+from fba.utils import vis_utils
 from .build import HOOK_REGISTRY, HookBase
-from fba.utils.vis_utils import draw_segmentation_masks
 
 
 @HOOK_REGISTRY.register_module
@@ -64,15 +64,13 @@ class MetricHook(HookBase):
     def __init__(
             self,
             ims_per_log: int,
-            n_diversity_samples: int,
-            fid_real_directory: str,
+            cache_directory: str,
             **kwargs
             ):
         self.next_check = ims_per_log
         self.num_ims_per_fid = ims_per_log
-        self._n_diversity_samples = n_diversity_samples
         self._min_lpips = 9999
-        self.fid_real_directory = fid_real_directory
+        self.cache_directory = cache_directory
 
     def state_dict(self):
         return {
@@ -92,10 +90,7 @@ class MetricHook(HookBase):
         logger.info("Starting calculation of metrics.")
         generator = self.trainer.EMA_generator
         metrics_ = metrics.compute_metrics_iteratively(
-            self.trainer.data_val,
-            generator,
-            n_diversity_samples=self._n_diversity_samples,
-            fid_real_directory=self.fid_real_directory
+            self.trainer.data_val, generator, self.cache_directory
         )
         if "lpips" in metrics_:
             val = metrics_["lpips"]
@@ -153,23 +148,10 @@ class ImageSaveHook(HookBase):
         batch = next(iter(self.trainer.data_val))
         g = generator.module if isinstance(generator, torch.nn.parallel.DistributedDataParallel) else generator
         z = torch.zeros_like(g.get_z(batch["img"]))
-        with torch.cuda.amp.autocast(utils.AMP()):
-            fake_data_sample = generator(**batch, z=z)["img"]
-
-        condition = batch["img"]*0.4 + batch["condition"]*0.6
-        condition = utils.gather_tensors(condition)[:self.nims2log]
+        fake_data_sample = utils.denormalize_img(generator(**batch, z=z)["img"]).mul(255).byte()
+        real = vis_utils.visualize_batch(**batch)
+        condition = utils.gather_tensors(real)[:self.nims2log]
         fake_data_sample = utils.gather_tensors(fake_data_sample)[:self.nims2log]
-
-        if "semantic_mask" in batch:
-            semantic_mask = utils.gather_tensors(batch["semantic_mask"])[:self.nims2log]
-            semantic_mask = semantic_mask.bool().cpu()
-            condition = (utils.denormalize_img(condition)*255).byte().cpu()
-            condition = [
-                draw_segmentation_masks(c, m, colors=self.semantic_colors, alpha=.5)
-                for c, m in zip(condition, semantic_mask)
-            ]
-            condition = torch.stack(condition).float()/255*2 - 1
-            fake_data_sample = fake_data_sample.cpu()
 
         to_save = torch.cat([condition, fake_data_sample])
         logger.save_images(
@@ -186,16 +168,17 @@ class ImageSaveHook(HookBase):
         batch = next(iter(self.trainer.data_val))
         assert self.n_diverse_images % utils.world_size() == 0
         batch = {k: v[:self.n_diverse_images//utils.world_size()] for k, v in batch.items()}
-        fakes = [utils.gather_tensors(batch["condition"])]
+        reals = vis_utils.visualize_batch(**batch)
+        to_vis = [utils.gather_tensors(reals)]
         if self.zs is None:
             g_ = g.module if isinstance(g, torch.nn.parallel.DistributedDataParallel) else g
             z = [g_.get_z(batch["img"]) for _ in range(self._n_diverse_samples)]
             self.zs = torch.stack(z)[:, :self.n_diverse_images//utils.world_size()]
         self.zs = self.zs.to(batch["img"].device)
         for z in self.zs:
-            with torch.cuda.amp.autocast(utils.AMP()):
-                fake = g(**batch, z=z)["img"]
-            fakes.append(utils.gather_tensors(fake))
-        fakes = torch.cat(fakes)
-        logger.save_images("diverse", fakes, nrow=self.n_diverse_images)
+            fake = utils.denormalize_img(g(**batch, z=z)["img"]).mul(255).byte()
+            
+            to_vis.append(utils.gather_tensors(fake))
+        to_vis = torch.cat(to_vis)
+        logger.save_images("diverse", to_vis, nrow=self.n_diverse_images)
         g.train()

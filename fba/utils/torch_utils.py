@@ -1,6 +1,3 @@
-import pathlib
-import torchvision
-from PIL import Image
 import numpy as np
 import torch
 import tqdm
@@ -9,11 +6,24 @@ import os
 from torchvision.transforms.functional import InterpolationMode, resize
 
 
-def get_device():
-    if torch.cuda.is_available():
-        return torch.device(f"cuda:{rank()}")
-    return torch.device("cpu")
+_world_size = 1
+_rank = 0
+device = None
 
+def rank() -> int:
+    return _rank
+
+def _set_device():
+    global device
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{rank()}")
+    else:
+        device = torch.device("cpu")
+
+_set_device()
+def get_device():
+    return device
+    
 
 def denormalize_img(image, mean=0.5, std=0.5):
     image = image * std + mean
@@ -31,7 +41,8 @@ def num_parameters(module: torch.nn.Module):
 
 
 def _to_cuda(element):
-    return element.to(get_device(), non_blocking=True)
+    memory_format = torch.contiguous_format
+    return element.to(get_device(), non_blocking=True, memory_format=memory_format)
 
 
 def to_cuda(elements):
@@ -142,12 +153,7 @@ def forward_D_fake(batch, fake_img, discriminator):
     return discriminator(**fake_batch)
 
 
-_world_size = 1
-_rank = 0
 
-
-def rank() -> int:
-    return _rank
 
 
 def world_size() -> int:
@@ -158,13 +164,14 @@ def set_world_size_and_rank(rank, world_size):
     global _world_size, _rank
     _rank = rank
     _world_size = world_size
+    _set_device()
 
 
-def gather_tensors(tensor):
+def gather_tensors(tensor, async_op=False):
     if world_size() <= 1:
         return tensor
     output = [tensor.clone() for _ in range(world_size())]
-    torch.distributed.all_gather(tensor=tensor, tensor_list=output)
+    torch.distributed.all_gather(tensor=tensor, tensor_list=output, async_op=async_op)
     return torch.cat(output)
 
 
@@ -228,3 +235,24 @@ def masks_to_boxes(segmentation: torch.Tensor):
     y0 = y.argmax(dim=1)
     y1 = segmentation.shape[1] - y.flip(dims=(1,)).argmax(dim=1)
     return torch.stack([x0, y0, x1, y1], dim=1)
+
+
+@torch.no_grad()
+def binary_dilation(im: torch.Tensor, kernel: torch.Tensor):
+    assert len(im.shape) == 4
+    assert len(kernel.shape) == 2
+    kernel = kernel.unsqueeze(0).unsqueeze(0)
+    padding = kernel.shape[-1]//2
+    assert kernel.shape[-1] % 2 != 0
+    if torch.cuda.is_available():
+        im, kernel = im.half(), kernel.half()
+    else:
+        im, kernel = im.float(), kernel.float()
+    im = torch.nn.functional.conv2d(
+        im, kernel, groups=im.shape[1], padding=padding)
+    im = im.clamp(0, 1).bool()
+    return im
+
+
+def has_intermediate_latent(G) -> bool:
+    return G.latent_space != None

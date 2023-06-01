@@ -17,63 +17,49 @@ class FPNDiscriminator(layers.Module):
             imsize,
             min_fmap_resolution: int,
             image_channels: int,
-            input_condition: bool,
-            semantic_nc: int,
-            semantic_input_mode: str,
             conv_clamp: int,
             input_cse: bool,
             cse_nc: int,
-            pred_only_cse: bool = False,
-            pred_only_semantic: bool = False,
+            output_fpn: bool,
+            input_condition=True,
             *args,
             **kwargs):
         super().__init__()
-        if pred_only_cse:
-            semantic_nc = None
-        if pred_only_semantic:
-            cse_nc = None
-        self.pred_only_cse = pred_only_cse
-        self.pred_only_semantic = pred_only_semantic
-        assert semantic_nc is None or cse_nc is None
-        semantic_nc = 0 if semantic_nc is None else semantic_nc
-        cse_nc = 0 if cse_nc is None else cse_nc
-        semantic_nc += cse_nc
         self._max_imsize = max(imsize)
         self._cnum = cnum
         self._max_cnum_mul = max_cnum_mul
         self._min_fmap_resolution = min_fmap_resolution
-        self._input_condition = input_condition
-        self.semantic_input_mode = semantic_input_mode
         self.input_cse = input_cse
+        self.output_fpn = output_fpn
+        self.input_condition = input_condition
         self.layers = nn.ModuleList()
 
         out_ch = self.get_chsize(self._max_imsize)
         self.from_rgb = StyleGAN2Block(
-            image_channels + input_condition*(image_channels+1) +
-            semantic_nc*(semantic_input_mode == "at_input") + input_cse*cse_nc,
-            out_ch, imsize, None, architecture="orig", conv_clamp=conv_clamp
+            image_channels + (image_channels+1)*self.input_condition,
+            out_ch, imsize, architecture="orig", conv_clamp=conv_clamp
         )
-        self.output_seg_layer = Conv2dLayer(
-            semantic_nc, semantic_nc+1*(cse_nc==0), None, None, kernel_size=1, activation="linear")
         n_levels = int(np.log2(self._max_imsize) - np.log2(min_fmap_resolution))+1
-        self.fpn_out = nn.ModuleList()
-        self.fpn_up = nn.ModuleList()
+        if self.output_fpn:
+            self.fpn_out = nn.ModuleList()
+            self.fpn_up = nn.ModuleList()
+            self.output_seg_layer = Conv2dLayer(
+                128, cse_nc, None, kernel_size=1, activation="linear")
+
         for i in range(n_levels):
             resolution = [x//2**i for x in imsize]
             in_ch = self.get_chsize(max(resolution))
             out_ch = self.get_chsize(max(max(resolution)//2, min_fmap_resolution))
 
-            if i != n_levels - 1:
-                fpn_up_in_ = semantic_nc if i != n_levels - 2 else in_ch
+            if i != n_levels - 1 and output_fpn:
+                fpn_up_in_ = 128 if i != n_levels - 2 else in_ch
                 up = 2 if i != 0 else 1
-                fpn_up = Conv2dLayer(fpn_up_in_, semantic_nc, None, resolution, kernel_size=1, activation="linear", up=up, conv_clamp=conv_clamp)
+                fpn_up = Conv2dLayer(fpn_up_in_, 128, resolution, kernel_size=1, activation="linear", up=up, conv_clamp=conv_clamp)
                 self.fpn_up.append(fpn_up)
-                fpn_conv = Conv2dLayer(in_ch, semantic_nc, None, resolution, kernel_size=1, activation="linear", conv_clamp=conv_clamp)
+                fpn_conv = Conv2dLayer(in_ch, 128, resolution, kernel_size=1, activation="linear", conv_clamp=conv_clamp)
                 self.fpn_out.append(fpn_conv)
 
-            if semantic_input_mode == "progressive_input":
-                self.layers.add_module(f"sematic_input{'x'.join([str(_) for _ in resolution])}", layers.SemanticCat())
-                in_ch += semantic_nc
+
             down = 2
             if i == 0:
                 down = 1
@@ -88,40 +74,36 @@ class FPNDiscriminator(layers.Module):
 
     def forward(self, img, condition, mask, semantic_mask=None, embedding=None, **kwargs):
         to_cat = [img]
-        if self.semantic_input_mode == "at_input":
-            to_cat.append(semantic_mask)
-        if self._input_condition:
-            to_cat.extend([condition, mask,])
-        if self.input_cse:
-            to_cat.extend([embedding])
+        if self.input_condition:
+            to_cat.extend([condition, mask])
         x = torch.cat(to_cat, dim=1)
-        batch = {"x": x, "semantic_mask": semantic_mask, "mask": None}
+        batch = {"x": x, "mask": None}
         batch = self.from_rgb(batch)
-        fpn_skips = [self.fpn_out[0](batch["x"])]
+        if self.output_fpn:
+            fpn_skips = [self.fpn_out[0](batch["x"])]
 
         for i, layer in enumerate(self.layers):
             batch = layer(batch)
+            if not self.output_fpn:
+                continue
             if i < len(self.layers)-2:
                 fpn_skips.append(
                     self.fpn_out[i+1](batch["x"], gain=np.sqrt(.5))
                 )
             elif i == len(self.layers) - 2:
                 fpn_skips.append(batch["x"])
-
-        fpn_skips.reverse()
-        segmentation = fpn_skips[0]
-        for i in range(len(self.fpn_up)):
-            segmentation = self.fpn_up[-i-1](segmentation, gain=np.sqrt(0.5))
-            segmentation = (segmentation + fpn_skips[i+1])
+        
+        
         batch = self.output_layer(batch)
-        segmentation = self.output_seg_layer(segmentation)
-        x = batch["x"]
-        out = dict(score=x, segmentation=segmentation, E=segmentation)
-        if self.pred_only_cse:
-            del out["segmentation"]
-        if self.pred_only_semantic:
-            del out["E"]
-        return out
+        if not self.output_fpn:
+            return dict(score=batch["x"])
+        fpn_skips.reverse()
+        E = fpn_skips[0]
+        for i in range(len(self.fpn_up)):
+            E = self.fpn_up[-i-1](E, gain=np.sqrt(0.5))
+            E = (E + fpn_skips[i+1])
+        E = self.output_seg_layer(E)
+        return dict(score=batch["x"], E=E)
 
     def get_chsize(self, imsize):
         n = int(np.log2(self._max_imsize) - np.log2(imsize))

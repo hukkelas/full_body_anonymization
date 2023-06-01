@@ -142,6 +142,9 @@ class Config(object):
         # merge dict a into dict b. values in a will overwrite b.
         for k, v in a.items():
             if isinstance(v, dict) and k in b:
+                if b[k] is None:
+                    b[k] = v
+                    continue
                 if not isinstance(b[k], dict):
                     raise TypeError(f"Cannot inherit key {k} from base!")
                 Config._merge_a_into_b(v, b[k])

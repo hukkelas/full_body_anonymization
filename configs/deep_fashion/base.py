@@ -6,31 +6,28 @@ max_images_to_train = int(8e6)
 optimizer = dict(D_opts=dict(lr=0.002), G_opts=dict(lr=0.002))
 
 loss = dict(
+    gan_criterion=dict(type="uncond_fpn_cse", l1_weight=1, lambda_real=1, lambda_fake=0),
     gradient_penalty=dict(mask_out=False),
 )
 
 generator = dict(
     type="DecoderGenerator",
-    min_fmap_resolution=32,
     cnum=48,
     max_cnum_mul=16,
-    n_middle_blocks=2,
     z_channels=512,
-    use_norm=True,
     style_cfg=dict(
-        type="UnconditionalCSEStyleMapper", decoder_modulator="CSELinearSimple",
-        w_mapper=dict(input_z=True)),
-    embed_z=True,
+        type="UnconditionalCSEStyleMapper",
+        w_mapper=dict(input_z=True, n_layer_z=2),
+        only_gamma=True),
+    embed_z=False,
     class_specific_z=False,
     conv_clamp=256,
 )
 
-
-discriminator = dict(
-    max_cnum_mul=16,
+discriminator=dict(
+    type="FPNDiscriminator",
+    output_fpn=True,
     cnum=32,
+    max_cnum_mul=16,
     input_condition=False,
-    semantic_input_mode=None,
-    conv_clamp=256,
-    input_cse=False
 )

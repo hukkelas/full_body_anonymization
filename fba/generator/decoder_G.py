@@ -28,13 +28,11 @@ class DecoderGenerator(BaseGenerator):
                 z_channels: int,
                 semantic_nc: Optional[int],
                 conv_clamp: int,
-                use_norm: bool,
                 style_cfg: dict,
                 embed_z: bool,
                 class_specific_z: bool,
                 cse_nc: int,
                 use_cse: bool = True,
-                use_noise: bool = False,
                 *args,
                 **kwargs
                 ) -> None:
@@ -47,8 +45,6 @@ class DecoderGenerator(BaseGenerator):
         semantic_nc = 0 if semantic_nc is None else semantic_nc
         cse_nc = 0 if cse_nc is None else cse_nc
         semantic_nc += cse_nc
-        use_w = False
-        w_dim = None
         self.imsize = imsize
         self.class_specific_z = class_specific_z
         self._cnum = cnum
@@ -77,19 +73,19 @@ class DecoderGenerator(BaseGenerator):
             if i != n_levels - 1:
                 up = 2
             block = StyleGAN2Block(
-                in_ch, out_ch, resolution, w_dim, up=up, use_w=use_w, conv_clamp=conv_clamp, use_noise=use_noise,
-                use_norm=use_norm)
+                in_ch, out_ch, resolution, up=up, conv_clamp=conv_clamp,
+                norm_type="instance_norm_std")
             decoder_layers.append(block)
             feature_sizes_dec.append([in_ch, *resolution])
             feature_sizes_dec.append([out_ch, *resolution])
         res = [x//2**(n_levels-1) for x in imsize]
         feature_sizes_dec.insert(0, [max_ch, *res])
         self.x = torch.nn.Parameter(torch.randn((1, max_ch, *res)))
-        self.first = Conv2dLayer(max_ch, max_ch, None, res, conv_clamp=conv_clamp, use_norm=use_norm)
+        self.first = Conv2dLayer(max_ch, max_ch, res, conv_clamp=conv_clamp, norm_type="instance_norm_std")
         if self.embed_z:
             self.z_projector = FullyConnectedLayer(z_channels, max_ch)
         self.decoder = layers.Sequential(*decoder_layers)
-        self.to_rgb = ToRGBLayer(cnum, image_channels, w_dim, conv_clamp=conv_clamp, use_w=use_w)
+        self.to_rgb = ToRGBLayer(cnum, image_channels, conv_clamp=conv_clamp)
         self.style_net = build_stylenet(style_cfg,
             feature_sizes_dec=feature_sizes_dec,
             cse_nc=semantic_nc,

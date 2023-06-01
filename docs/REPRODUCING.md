@@ -16,42 +16,33 @@ configs/surface_guided/configE.py
 ```
 ### Table 2
 ```
-configs/surface_guided/ablations/f_depth/C_0.py
-configs/surface_guided/ablations/f_depth/C_2.py
-configs/surface_guided/ablations/f_depth/C_4.py
-configs/surface_guided/ablations/f_depth/C_6.py
-configs/surface_guided/ablations/f_depth/D_0.py
-configs/surface_guided/ablations/f_depth/D_2.py
-configs/surface_guided/ablations/f_depth/D_4.py
-configs/surface_guided/ablations/f_depth/D_6.py
+
+configs/surface_guided/ablations/f_depth/configD_n0.py
+configs/surface_guided/ablations/f_depth/configD_n2.py
+configs/surface_guided/ablations/f_depth/configD_n4.py
+configs/surface_guided/configD.py
 ```
 
 ### Table 3
 ```
-configs/surface_guided/configA.py
 configs/surface_guided/configB.py
-configs/surface_guided/configC.py
-configs/surface_guided/configD.py
-configs/semantic_guided/spade.py
-configs/semantic_guided/inade.py
-```
-### Table 4
-```
-configs/semantic_guided/clade.py
-configs/semantic_guided/inade.py
-configs/semantic_guided/spade.py
+configs/surface_guided/ablations/modulation/configB_spade.py
+configs/surface_guided/ablations/modulation/configB_inade.py
+configs/surface_guided/ablations/modulation/configB_clade.py
+configs/surface_guided/ablations/modulation/configB_stylegan.py
+configs/surface_guided/ablations/modulation/configB_comod.py
 configs/surface_guided/configC.py
 configs/surface_guided/configD.py
 ```
 
-### Table 5
+
+#### Computing invariance to affine transformations
 ```
-configs/semantic_guided/CE.py
-configs/surface_guided/configB.py
-configs/semantic_guided/spade_CE.py
-configs/semantic_guided/spade.py
-configs/semantic_guided/vsam_CE.py
-configs/surface_guided/configD.py
+python -m tools.evaluation.affine_invariance configs/surface_guided/configD.py
+```
+#### Computing Face FID
+```
+python -m tools.evaluation.face_fid configs/surface_guided/configD.py
 ```
 
 ### Table 6 - COCO Anonymization results
